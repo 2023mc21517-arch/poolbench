@@ -228,15 +228,118 @@ def rewrite_conditionality(pos_text: str) -> Optional[str]:
     return result
 
 
+# ── Frustration: soften hostile/frustrated language to neutral-register ───────
+# Matched pairs: same Yelp/Reddit post with frustration markers toned down.
+
+_FRUSTRATION_SUBS: list[tuple[str, str]] = [
+    (r"\bfrustrat(?:ing|ed|ingly|ion)?\b",  "challenging"),
+    (r"\bfurious(?:ly)?\b",                  "concerned"),
+    (r"\binfuriat\w+\b",                     "bothered"),
+    (r"\boutrag(?:ed|ing|eous(?:ly)?)\b",    "disappointed"),
+    (r"\bnever\s+again\b",                   ""),
+    (r"\bworst\b",                           "poor"),
+    (r"\bterrible\b",                        "poor"),
+    (r"\bhorrible\b",                        "poor"),
+    (r"\bawful\b",                           "poor"),
+    (r"\batrocious\b",                       "subpar"),
+    (r"\bappalling\b",                       "poor"),
+    (r"\bpathetic\b",                        "poor"),
+    (r"\bdisgusting\b",                      "unpleasant"),
+    (r"\bunacceptable\b",                    "subpar"),
+    (r"\bdeplorable\b",                      "poor"),
+    (r"\babysmal\b",                         "poor"),
+    (r"\bincompetent\b",                     "poor"),
+    (r"\brip(?:-|\s*)off\b",                 "overpriced"),
+    (r"\bripped\s+off\b",                    "overcharged"),
+]
+
+
+def rewrite_frustration(pos_text: str) -> Optional[str]:
+    """
+    Tone-down frustrated language to produce a lower-frustration negative.
+    Returns None if no frustration markers found or result collapses.
+    """
+    found = False
+    result = pos_text
+    for pattern, replacement in _FRUSTRATION_SUBS:
+        new = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
+        if new != result:
+            found = True
+            result = new
+    if not found:
+        return None
+    result = re.sub(r" {2,}", " ", result).strip()
+    if len(result.split()) < 10:
+        return None
+    return result
+
+
+# ── Negation density: remove negation words to produce zero-negation text ────
+# Matched pairs: same passage with negation markers stripped out.
+
+_NEGATION_SUBS: list[tuple[str, str]] = [
+    (r"\bcannot\b",          "can"),
+    (r"\bcan't\b",           "can"),
+    (r"\bwon't\b",           "will"),
+    (r"\bdon't\b",           "do"),
+    (r"\bdoesn't\b",         "does"),
+    (r"\bdidn't\b",          "did"),
+    (r"\bweren't\b",         "were"),
+    (r"\baren't\b",          "are"),
+    (r"\bisn't\b",           "is"),
+    (r"\bhasn't\b",          "has"),
+    (r"\bhaven't\b",         "have"),
+    (r"\bwouldn't\b",        "would"),
+    (r"\bshouldn't\b",       "should"),
+    (r"\bcouldn't\b",        "could"),
+    (r"\bmustn't\b",         "must"),
+    (r"\bneedn't\b",         "need"),
+    (r"\bdaren't\b",         "dare"),
+    # "not X" → "X"  (remove the "not" and trailing space)
+    (r"\bnot\s+",            ""),
+    # "no X" → "X"  (remove "no " before a word)
+    (r"\bno\s+(?=\w)",       ""),
+    (r"\bnever\b",           ""),
+    (r"\bneither\b",         ""),
+    (r"\bnor\b",             "or"),
+    (r"\bwithout\b",         "with"),
+]
+
+_NEG_TOKEN_RE = re.compile(r"\b(not|no|never|neither|nor|without|cannot|n't)\b", re.IGNORECASE)
+
+
+def rewrite_negation_density(pos_text: str) -> Optional[str]:
+    """
+    Remove negation markers from a high-negation passage to produce a zero-negation negative.
+    Returns None if no negation found or result collapses to < 10 words.
+    """
+    if not _NEG_TOKEN_RE.search(pos_text):
+        return None
+    result = pos_text
+    for pattern, replacement in _NEGATION_SUBS:
+        result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
+    result = re.sub(r" {2,}", " ", result).strip()
+    # Verify negation count dropped; also reject if still has negation tokens
+    if _NEG_TOKEN_RE.search(result):
+        # Some negations remain — strip residual contracted forms
+        result = re.sub(r"\bn't\b", "", result, flags=re.IGNORECASE)
+        result = re.sub(r" {2,}", " ", result).strip()
+    if len(result.split()) < 10:
+        return None
+    return result
+
+
 # ── Registry ──────────────────────────────────────────────────────────────────
 
 REWRITERS: dict[str, callable] = {
-    "hedging":        rewrite_hedging,
-    "legal_formality": rewrite_legal_formality,
-    "math_certainty": rewrite_math_certainty,
-    "causation":      rewrite_causation,
-    "contrast":       rewrite_contrast,
-    "conditionality": rewrite_conditionality,
+    "hedging":           rewrite_hedging,
+    "legal_formality":   rewrite_legal_formality,
+    "math_certainty":    rewrite_math_certainty,
+    "causation":         rewrite_causation,
+    "contrast":          rewrite_contrast,
+    "conditionality":    rewrite_conditionality,
+    "frustration":       rewrite_frustration,
+    "negation_density":  rewrite_negation_density,
 }
 
 

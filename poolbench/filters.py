@@ -352,6 +352,182 @@ def filter_multinli_neg_for_negation(premise: str) -> bool:
     return filter_negation_negative(premise)
 
 
+
+
+# ── Syntactic: conditionality (text-based, for multi-domain rewriting) ───────
+
+_COND_MARKERS = [
+    "if ", "unless ", "whenever ", "provided that", "given that",
+    "assuming that", "in the event that", "on condition that",
+]
+
+
+def filter_conditionality_positive(text: str) -> bool:
+    lowered = text.lower()
+    return any(m in lowered for m in _COND_MARKERS)
+
+
+# ── Semantic-abstract: deference (text-based, for multi-domain) ──────────────
+
+_DEFERENCE_POS_MARKERS = [
+    "previous work", "prior work", "prior study", "prior research",
+    "as shown by", "as demonstrated by",
+    "it has been shown", "it has been established", "it has been found",
+    "building on", "following the approach", "based on the work",
+    "extending the approach",
+]
+
+_DEFERENCE_NEG_MARKERS = [
+    "we show", "we demonstrate", "we find", "we present",
+    "we propose", "we introduce", "in this paper we",
+    "our result", "our finding", "our approach", "our method",
+]
+
+
+def filter_deference_positive(text: str) -> bool:
+    lowered = text.lower()
+    return any(m in lowered for m in _DEFERENCE_POS_MARKERS)
+
+
+def filter_deference_negative(text: str) -> bool:
+    lowered = text.lower()
+    return (
+        any(m in lowered for m in _DEFERENCE_NEG_MARKERS) and
+        not any(m in lowered for m in _DEFERENCE_POS_MARKERS)
+    )
+
+
+# ── Semantic-abstract: planning (text-based, for multi-domain) ───────────────
+
+_PLANNING_POS_MARKERS = [
+    "we will ", "future work", "we plan to", "we aim to", "we intend to",
+    "will be investigated", "will be explored", "will be extended",
+    "in future", "as future work", "will investigate", "will extend",
+    "future direction", "future research", "left for future",
+]
+
+_PLANNING_NEG_MARKERS = [
+    "we show", "we present", "we demonstrate", "we introduce",
+    "we propose", "we describe", "we report", "we develop",
+    "we prove", "we establish", "we analyse", "we analyze",
+    "this paper presents", "this work presents",
+]
+
+
+def filter_planning_positive(text: str) -> bool:
+    lowered = text.lower()
+    return any(m in lowered for m in _PLANNING_POS_MARKERS)
+
+
+def filter_planning_negative(text: str) -> bool:
+    lowered = text.lower()
+    return (
+        any(m in lowered for m in _PLANNING_NEG_MARKERS) and
+        not any(m in lowered for m in _PLANNING_POS_MARKERS)
+    )
+
+
+# ── Dense-lexical: frustration (text-based, for multi-domain) ────────────────
+
+_FRUSTRATION_TEXT_RE = re.compile(
+    r'\b(frustrat|furious|infuriat|outrag|appalling|unacceptable|'
+    r'incompetent|pathetic|atrocious|dreadful|never again|'
+    r'worst experience|terrible service|disgusting|deplorable|'
+    r'unprofessional|abysmal)\b',
+    re.IGNORECASE,
+)
+
+_NON_FRUSTRATION_TEXT_RE = re.compile(
+    r'\b(frustrat|furious|infuriat|outrag|terrible|horrible|worst|'
+    r'angry|annoy|upset|disappointing|awful|pathetic|atrocious)\b',
+    re.IGNORECASE,
+)
+
+
+def filter_frustration_positive_text(text: str) -> bool:
+    return bool(_FRUSTRATION_TEXT_RE.search(text))
+
+
+def filter_frustration_negative_text(text: str) -> bool:
+    return not bool(_NON_FRUSTRATION_TEXT_RE.search(text))
+
+
+# ── Dense-lexical: pos_sentiment (text-based, for multi-domain) ──────────────
+
+_POS_SENT_RE = re.compile(
+    r'\b(excellent|wonderful|amazing|fantastic|outstanding|love|perfect|'
+    r'best|recommend|delicious|friendly|professional|exceptional|superb|'
+    r'brilliant|phenomenal|incredible|awesome|favourite|favorite|great)\b',
+    re.IGNORECASE,
+)
+
+_NEG_SENT_RE = re.compile(
+    r'\b(terrible|horrible|awful|worst|bad|disappointing|poor|useless|'
+    r'waste|boring|mediocre|dreadful|unpleasant)\b',
+    re.IGNORECASE,
+)
+
+
+def filter_pos_sentiment_positive_text(text: str) -> bool:
+    return bool(_POS_SENT_RE.search(text)) and not bool(_NEG_SENT_RE.search(text))
+
+
+def filter_pos_sentiment_negative_text(text: str) -> bool:
+    return bool(_NEG_SENT_RE.search(text)) and not bool(_POS_SENT_RE.search(text))
+
+
+# ── Dense-lexical: toxicity (text-based, for multi-domain) ───────────────────
+
+_HOSTILE_TEXT_RE = re.compile(
+    r'\b(horrible|disgusting|pathetic|awful|atrocious|worthless|'
+    r'incompetent|rude|nasty|scam|fraud|liar|cheated|ripped off|'
+    r'disgraceful|unacceptable|offensive|abysmal|deplorable|'
+    r'unprofessional|absolutely terrible|stay away)\b',
+    re.IGNORECASE,
+)
+
+_POSITIVE_TEXT_RE = re.compile(
+    r'\b(excellent|wonderful|amazing|fantastic|outstanding|love|'
+    r'perfect|best|recommend|delicious|friendly|professional|exceptional|'
+    r'superb|brilliant|phenomenal|incredible|awesome)\b',
+    re.IGNORECASE,
+)
+
+
+def filter_toxicity_positive_text(text: str) -> bool:
+    return bool(_HOSTILE_TEXT_RE.search(text))
+
+
+def filter_toxicity_negative_text(text: str) -> bool:
+    return bool(_POSITIVE_TEXT_RE.search(text)) and not bool(_HOSTILE_TEXT_RE.search(text))
+
+
+# ── Dense-lexical: depression (text-based, for multi-domain) ─────────────────
+
+_DEPRESSION_TEXT_RE = re.compile(
+    r'\b(depress(?:ed|ion|ing)?|suicid(?:al|e)?|hopeless(?:ness)?|'
+    r'worthless(?:ness)?|despair|emptiness|can\'t go on|'
+    r'overwhelming sadness|i feel nothing|no reason to live|'
+    r'self.harm|mental health|anxiety|'
+    r'i hate myself|so tired of everything)\b',
+    re.IGNORECASE,
+)
+
+_NON_DEPRESSION_TEXT_RE = re.compile(
+    r'\b(depress|suicid|hopeless|despair|self.harm|worthless|'
+    r'i feel nothing|hate myself)\b',
+    re.IGNORECASE,
+)
+
+
+def filter_depression_positive_text(text: str) -> bool:
+    return bool(_DEPRESSION_TEXT_RE.search(text))
+
+
+def filter_depression_negative_text(text: str) -> bool:
+    return not bool(_NON_DEPRESSION_TEXT_RE.search(text))
+
+
 # ── Registry: get filter by (concept, label) ─────────────────────────────────
 
 TEXT_FILTERS: dict[tuple[str, str], Callable[[str], bool]] = {
@@ -370,10 +546,24 @@ TEXT_FILTERS: dict[tuple[str, str], Callable[[str], bool]] = {
     ("uncertainty",         "pos"): filter_uncertainty_positive,
     ("uncertainty",         "neg"): filter_uncertainty_negative,
     ("causation",           "pos"): filter_causation_positive,
+    ("contrast",            "pos"): filter_contrast_positive,
+    ("conditionality",      "pos"): filter_conditionality_positive,
+    ("deference",           "pos"): filter_deference_positive,
+    ("deference",           "neg"): filter_deference_negative,
+    ("planning",            "pos"): filter_planning_positive,
+    ("planning",            "neg"): filter_planning_negative,
+    ("frustration",         "pos"): filter_frustration_positive_text,
+    ("frustration",         "neg"): filter_frustration_negative_text,
     ("negation_density",    "pos"): filter_negation_positive,
     ("negation_density",    "neg"): filter_negation_negative,
     ("numerical_precision", "pos"): filter_numerical_positive,
     ("numerical_precision", "neg"): filter_numerical_negative,
+    ("pos_sentiment",       "pos"): filter_pos_sentiment_positive_text,
+    ("pos_sentiment",       "neg"): filter_pos_sentiment_negative_text,
+    ("toxicity",            "pos"): filter_toxicity_positive_text,
+    ("toxicity",            "neg"): filter_toxicity_negative_text,
+    ("depression",          "pos"): filter_depression_positive_text,
+    ("depression",          "neg"): filter_depression_negative_text,
 }
 
 
