@@ -1,0 +1,55 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+.env
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# ── Project generated data ────────────────────────────────────────────────────
+# Corpus JSONL files (large — users must run scripts/dataset_builder.py to build)
+data/corpora/*/
+!data/corpora/.gitkeep
+
+# Raw HF download cache (large)
+data/raw/
+!data/raw/.gitkeep
+
+# Activation .npy files (very large — produced by scripts/run_model.py)
+results/activations/
+results/auroc/
+results/linearity/
+results/nemenyi/
+results/icc/
+results/power_analysis.json
+results/bert_classifiers/
+!results/.gitkeep
+
+# BERT classifier checkpoints (large)
+results/bert_classifiers/
+
+# ── Notebooks / IDE ───────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+.idea/
+.vscode/
+*.DS_Store
+
+# ── HuggingFace cache ─────────────────────────────────────────────────────────
+~/.cache/huggingface/
+
+# ── SAE checkpoints ───────────────────────────────────────────────────────────
+*.safetensors
+*.bin
+*.pt
+*.pth
