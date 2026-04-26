@@ -76,6 +76,23 @@ def get_tokenizer():
     return _tokenizer
 
 
+def _chunk_tokens(text: str, tokenizer, target: int = 400, overlap: int = 50) -> list[str]:
+    """Split text into overlapping chunks of ~target tokens (for long source documents)."""
+    tokens = tokenizer.encode(text, add_special_tokens=False)
+    if len(tokens) <= target + 100:
+        return [text]
+    step = max(1, target - overlap)
+    chunks = []
+    for start in range(0, len(tokens), step):
+        end = min(start + target + 100, len(tokens))
+        chunk_text = tokenizer.decode(tokens[start:end], skip_special_tokens=True).strip()
+        if chunk_text:
+            chunks.append(chunk_text)
+        if end >= len(tokens):
+            break
+    return chunks
+
+
 # ── Split and save ─────────────────────────────────────────────────────────────
 
 def split_and_save(
@@ -199,36 +216,41 @@ def _hedging_arxiv_fallback(n_needed: int, tok):
 
 def build_legal_formality(n_total: int):
     """
-    Positives: lex_glue/scotus US Supreme Court opinions (Parquet, no script).
+    Positives: lex_glue/scotus US Supreme Court opinions (Parquet, no script),
+    chunked into 300–500 token windows (full opinions are thousands of tokens).
     Negatives: rule-based rewrite stripping legal markers.
     """
     from datasets import load_dataset
     from poolbench.rewriters import rewrite_legal_formality
     tok = get_tokenizer()
 
-    print("  Loading lex_glue/scotus for legal_formality positives ...")
+    print("  Loading lex_glue/scotus for legal_formality positives (chunking long opinions) ...")
     ds = load_dataset("lex_glue", "scotus", split="train", streaming=True)
 
     pos, neg, pair_ids = [], [], []
     counter = 0
     for ex in ds:
-        text = clean_text(ex.get("text", ""))
-        if not is_valid_length(text, tok):
-            continue
-        if not filter_legal_positive(text):
-            continue
-        rewritten = rewrite_legal_formality(text)
-        if rewritten is None:
-            continue
-        if not is_valid_length(rewritten, tok):
-            continue
-        if not is_length_matched(text, rewritten, tok):
-            continue
-        pair_id = f"legal_pair_{counter:05d}"
-        pos.append(text)
-        neg.append(rewritten)
-        pair_ids.append(pair_id)
-        counter += 1
+        full_text = clean_text(ex.get("text", ""))
+        # Chunk long opinions — most are 5,000–50,000 tokens
+        chunks = _chunk_tokens(full_text, tok, target=400, overlap=50)
+        for text in chunks:
+            if not is_valid_length(text, tok):
+                continue
+            if not filter_legal_positive(text):
+                continue
+            rewritten = rewrite_legal_formality(text)
+            if rewritten is None:
+                continue
+            if not is_valid_length(rewritten, tok):
+                continue
+            if not is_length_matched(text, rewritten, tok):
+                continue
+            pos.append(text)
+            neg.append(rewritten)
+            pair_ids.append(f"legal_pair_{counter:05d}")
+            counter += 1
+            if counter >= n_total:
+                break
         if counter >= n_total:
             break
 
@@ -306,34 +328,46 @@ def build_math_certainty(n_total: int):
 
 def build_frustration(n_total: int):
     """
-    Natural parallel corpus: google-research-datasets/go_emotions
-    Positive labels: frustrated, furious, annoyed.
-    Negative labels: excited, joyful, proud, neutral.
-    Independent samples (not document-matched) — same dataset, different posts.
+    Yelp/yelp_review_full (Parquet, no script).
+    Positive: 1-star reviews (label=0) containing frustration/anger markers.
+    Negative: 4-5 star reviews (label 3-4) with no frustration/anger language.
+    Independent samples.
+    Note: go_emotions texts (~20 words) are too short for the 300-token minimum.
     """
+    import re
     from datasets import load_dataset
     tok = get_tokenizer()
 
-    print("  Loading go_emotions ...")
-    ds = load_dataset("google-research-datasets/go_emotions", name="simplified", split="train")
+    _FRUSTRATION_RE = re.compile(
+        r'\b(frustrat|furious|infuriat|outrag|appalling|unacceptable|'
+        r'incompetent|pathetic|atrocious|dreadful|never again|rip.{0,3}off|'
+        r'worst experience|terrible service|disgusting|deplorable|'
+        r'unprofessional|abysmal|could not believe|absolutely horrible)\b',
+        re.IGNORECASE,
+    )
+    _CALM_RE = re.compile(
+        r'\b(frustrat|furious|infuriat|outrag|terrible|horrible|'
+        r'worst|angry|annoy|upset|disappointing|awful|pathetic|atrocious)\b',
+        re.IGNORECASE,
+    )
 
-    # go_emotions: multi-label — each row has list of label indices; map idx→name
-    label_names = ds.features["labels"].feature.names
+    print("  Loading Yelp/yelp_review_full for frustration ...")
+    ds = load_dataset("Yelp/yelp_review_full", split="train", streaming=True)
 
     pos, neg = [], []
     for ex in ds:
-        text = clean_text(ex["text"])
+        text = clean_text(ex.get("text", ""))
+        label = int(ex.get("label", -1))   # 0=1-star, 4=5-star
         if not is_valid_length(text, tok):
             continue
-        labels = [label_names[i] for i in ex["labels"]]
-        if any(filter_frustration_positive_label(l) for l in labels):
+        if label == 0 and _FRUSTRATION_RE.search(text) and len(pos) < n_total:
             pos.append(text)
-        elif any(filter_frustration_negative_label(l) for l in labels):
+        elif label in (3, 4) and not _CALM_RE.search(text) and len(neg) < n_total:
             neg.append(text)
         if len(pos) >= n_total and len(neg) >= n_total:
             break
 
-    return pos, neg, "social", "social", None
+    return pos, neg, "review", "review", None
 
 
 def build_pos_sentiment(n_total: int):
@@ -384,30 +418,50 @@ def build_pos_sentiment(n_total: int):
 
 def build_toxicity(n_total: int):
     """
-    SetFit/toxic_conversations (Parquet, no script).
-    Positive: label=1 (toxic), Negative: label=0 (not toxic).
+    Yelp/yelp_review_full (Parquet, no script) with hostile-language filter.
+    Positive: 1-star reviews (label=0) containing hostile/aggressive language
+    (operationalises toxicity as hostile register; jigsaw_unintended_bias requires
+    a loading script incompatible with datasets>=3, and SetFit/toxic_conversations
+    texts are too short (avg ~30 tokens) to pass the 300-token minimum).
+    Negative: 5-star reviews (label=4) with clearly positive/non-hostile language.
     Independent samples.
     """
+    import re
     from datasets import load_dataset
     tok = get_tokenizer()
 
-    print("  Loading SetFit/toxic_conversations ...")
-    ds = load_dataset("SetFit/toxic_conversations", split="train", streaming=True)
+    _HOSTILE_RE = re.compile(
+        r'\b(horrible|disgusting|pathetic|awful|atrocious|worthless|'
+        r'incompetent|rude|nasty|scam|fraud|liar|cheated|ripped off|'
+        r'never coming back|avoid at all costs|worst (place|restaurant|service|'
+        r'experience|staff|food)|disgraceful|unacceptable|offensive|abysmal|'
+        r'deplorable|unprofessional|absolutely terrible|do not go|stay away)\b',
+        re.IGNORECASE,
+    )
+    _POSITIVE_RE = re.compile(
+        r'\b(excellent|wonderful|amazing|fantastic|outstanding|love|'
+        r'perfect|best|recommend|delicious|friendly|professional|exceptional|'
+        r'superb|brilliant|phenomenal|incredible|awesome|favourite|favorite)\b',
+        re.IGNORECASE,
+    )
+
+    print("  Loading Yelp/yelp_review_full for toxicity ...")
+    ds = load_dataset("Yelp/yelp_review_full", split="train", streaming=True)
 
     pos, neg = [], []
     for ex in ds:
         text = clean_text(ex.get("text", ""))
-        label = int(ex.get("label", -1))
+        label = int(ex.get("label", -1))   # 0=1-star, 4=5-star
         if not is_valid_length(text, tok):
             continue
-        if label == 1 and len(pos) < n_total:
+        if label == 0 and _HOSTILE_RE.search(text) and len(pos) < n_total:
             pos.append(text)
-        elif label == 0 and len(neg) < n_total:
+        elif label == 4 and _POSITIVE_RE.search(text) and len(neg) < n_total:
             neg.append(text)
         if len(pos) >= n_total and len(neg) >= n_total:
             break
 
-    return pos, neg, "social", "social", None
+    return pos, neg, "review", "review", None
 
 
 def build_depression(n_total: int):
@@ -498,41 +552,51 @@ def build_causation(n_total: int):
 
 def build_contrast(n_total: int):
     """
-    nyu-mll/multi_nli (Parquet, no script).
-    Positive: contradiction-label hypothesis pairs (adversative, contrastive content).
-    Negative: entailment-label hypothesis pairs (coherent, non-contrastive).
-    Independent samples (premise-matched to stay in same topical domain).
+    Rule-based filter on gfissore/arxiv-abstracts-2021 (Parquet, no script).
+    Positive: abstracts containing adversative/contrastive discourse markers
+    ("however", "although", "nevertheless", "in contrast", "despite", "whereas",
+    "on the other hand", "conversely") — aligned with DiscoGeM concept definition.
+    Negative: abstracts with none of these markers (direct, non-contrastive prose).
+    Note: nyu-mll/multi_nli hypotheses avg 10-15 words — always fail 300-token floor.
+    Independent samples.
     """
+    import re
     from datasets import load_dataset
     tok = get_tokenizer()
 
-    print("  Loading nyu-mll/multi_nli for contrast ...")
-    ds = load_dataset("nyu-mll/multi_nli", split="train", streaming=True)
+    _ADV_RE = re.compile(
+        r'\b(however|although|nevertheless|conversely|whereas|'
+        r'in contrast|on the other hand|despite|even though|'
+        r'in spite of|by contrast|that said|notwithstanding)\b',
+        re.IGNORECASE,
+    )
+
+    print("  Loading gfissore/arxiv-abstracts-2021 for contrast ...")
+    ds = load_dataset("gfissore/arxiv-abstracts-2021", split="train", streaming=True)
 
     pos, neg = [], []
     for ex in ds:
-        hyp = clean_text(ex.get("hypothesis", ""))
-        label = int(ex.get("label", -1))
-        if not is_valid_length(hyp, tok):
+        text = clean_text(ex.get("abstract", ""))
+        if not is_valid_length(text, tok):
             continue
-        if label == 2 and len(pos) < n_total:   # contradiction → contrastive
-            if filter_contrast_positive_label("adversative"):
-                pos.append(hyp)
-        elif label == 0 and len(neg) < n_total:  # entailment → coherent
-            if filter_contrast_negative_label("expansion"):
-                neg.append(hyp)
+        if _ADV_RE.search(text) and len(pos) < n_total:
+            pos.append(text)
+        elif not _ADV_RE.search(text) and len(neg) < n_total:
+            neg.append(text)
         if len(pos) >= n_total and len(neg) >= n_total:
             break
 
-    return pos, neg, "mixed", "mixed", None
+    return pos, neg, "academic", "academic", None
 
 
 def build_conditionality(n_total: int):
     """
-    Rule-based filter on nyu-mll/multi_nli (Parquet, no script).
-    Positive: hypotheses starting with "if", "when", "unless", "provided",
-    "whenever", "given that" (explicit conditional structure).
-    Negative: hypotheses with no conditional opener and plain declarative form.
+    Rule-based filter on gfissore/arxiv-abstracts-2021 (Parquet, no script).
+    Positive: abstracts containing explicit conditional constructions
+    ("if", "when", "unless", "provided that", "given that", "assuming that",
+    "in the event that", "whenever") — aligned with ConjNLI concept definition.
+    Negative: abstracts with no conditional markers (pure declarative statements).
+    Note: nyu-mll/multi_nli hypotheses avg 10-15 words — always fail 300-token floor.
     Independent samples.
     """
     import re
@@ -540,27 +604,27 @@ def build_conditionality(n_total: int):
     tok = get_tokenizer()
 
     _COND_RE = re.compile(
-        r'^(if|when|unless|provided|whenever|given that|assuming that|in the event that)\b',
+        r'\b(if\b|unless\b|whenever\b|provided that|given that|'
+        r'assuming that|in the event that|on the condition that)\b',
         re.IGNORECASE,
     )
-    _NEG_KW = re.compile(r'\b(if|when|unless|whenever|provided|assuming)\b', re.IGNORECASE)
 
-    print("  Loading nyu-mll/multi_nli for conditionality ...")
-    ds = load_dataset("nyu-mll/multi_nli", split="train", streaming=True)
+    print("  Loading gfissore/arxiv-abstracts-2021 for conditionality ...")
+    ds = load_dataset("gfissore/arxiv-abstracts-2021", split="train", streaming=True)
 
     pos, neg = [], []
     for ex in ds:
-        hyp = clean_text(ex.get("hypothesis", ""))
-        if not is_valid_length(hyp, tok):
+        text = clean_text(ex.get("abstract", ""))
+        if not is_valid_length(text, tok):
             continue
-        if _COND_RE.match(hyp) and len(pos) < n_total:
-            pos.append(hyp)
-        elif not _NEG_KW.search(hyp) and len(neg) < n_total:
-            neg.append(hyp)
+        if _COND_RE.search(text) and len(pos) < n_total:
+            pos.append(text)
+        elif not _COND_RE.search(text) and len(neg) < n_total:
+            neg.append(text)
         if len(pos) >= n_total and len(neg) >= n_total:
             break
 
-    return pos, neg, "mixed", "mixed", None
+    return pos, neg, "academic", "academic", None
 
 
 def build_academic_tone(n_total: int):
@@ -729,32 +793,50 @@ def build_deference(n_total: int):
 
 def build_planning(n_total: int):
     """
-    BigBench goal_step_wikihow (tasksource/bigbench config 'goal_step_wikihow').
-    Positive: step correctly belongs to goal (correct sub-action in plan).
-    Negative: plausible step from a different goal.
+    Rule-based filter on gfissore/arxiv-abstracts-2021 (Parquet, no script).
+    Positive: abstracts with future-directed planning markers ("we will",
+    "future work", "we plan to", "we aim to", "will be investigated",
+    "in future work", "will extend") — forward-looking research intent.
+    Negative: abstracts describing only completed work ("we show", "we present",
+    "we demonstrate", "this paper presents") with no future markers.
+    Note: tasksource/bigbench goal_step_wikihow inputs are formatted Q&A of
+    ~15 words — always fail the 300-token minimum.
+    Independent samples.
     """
+    import re
     from datasets import load_dataset
     tok = get_tokenizer()
 
-    print("  Loading tasksource/bigbench (goal_step_wikihow) ...")
-    ds = load_dataset("tasksource/bigbench", "goal_step_wikihow", split="train")
+    _PLAN_RE = re.compile(
+        r'\b(we will\b|future work|we plan to|we aim to|we intend to|'
+        r'will be (investigated|explored|extended|developed|applied|studied|examined)|'
+        r'ongoing work|in future|as future work|will investigate|will extend|'
+        r'left for future|direction for future|future direction|future research)\b',
+        re.IGNORECASE,
+    )
+    _PRESENT_RE = re.compile(
+        r'\b(we (show|present|demonstrate|introduce|propose|describe|report|'
+        r'develop|prove|establish|analyse|analyze|evaluate)|'
+        r'this (paper|work|article) (presents|introduces|proposes|describes))\b',
+        re.IGNORECASE,
+    )
+
+    print("  Loading gfissore/arxiv-abstracts-2021 for planning ...")
+    ds = load_dataset("gfissore/arxiv-abstracts-2021", split="train", streaming=True)
 
     pos, neg = [], []
     for ex in ds:
-        # Each example has 'inputs' (goal + step) and 'targets' (yes/no)
-        text = clean_text(ex.get("inputs", "") or ex.get("text", ""))
-        targets = ex.get("targets", [])
-        correct = (targets[0].lower() == "yes") if targets else False
+        text = clean_text(ex.get("abstract", ""))
         if not is_valid_length(text, tok):
             continue
-        if filter_planning_positive_label(correct):
+        if _PLAN_RE.search(text) and len(pos) < n_total:
             pos.append(text)
-        elif filter_planning_negative_label(correct):
+        elif _PRESENT_RE.search(text) and not _PLAN_RE.search(text) and len(neg) < n_total:
             neg.append(text)
         if len(pos) >= n_total and len(neg) >= n_total:
             break
 
-    return pos, neg, "howto", "howto", None
+    return pos, neg, "academic", "academic", None
 
 
 def build_negation_density(n_total: int):
@@ -876,6 +958,17 @@ def validate_corpus(concept: str, corpora_dir: Path) -> bool:
 
         pos_recs = load_jsonl(pos_file)
         neg_recs = load_jsonl(neg_file)
+
+        # Minimum record count check
+        min_expected = 100  # hard floor — anything less means the builder failed
+        if len(pos_recs) < min_expected:
+            print(f"  [FAIL] {concept}/{split}_pos: only {len(pos_recs)} records (minimum {min_expected})")
+            ok = False
+        if len(neg_recs) < min_expected:
+            print(f"  [FAIL] {concept}/{split}_neg: only {len(neg_recs)} records (minimum {min_expected})")
+            ok = False
+        if not ok:
+            continue
 
         # Length check
         bad_pos = [r for r in pos_recs if not (300 <= r["token_count"] <= 500)]

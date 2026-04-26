@@ -216,13 +216,27 @@ def filter_code_docs_positive(docstring: str) -> bool:
     return no_backticks and long_enough
 
 
+_CODE_DOCS_TECH_KW = re.compile(
+    r'\b(python|function|class|method|variable|argument|parameter|return|'
+    r'import|module|library|api|code|script|error|exception|bug|debug|'
+    r'loop|array|list|dict|string|integer|float|boolean|object|execute|'
+    r'syntax|algorithm|database|query|request|response|server|install|'
+    r'package|version|dependency|framework|interface|type|value|index|'
+    r'object|attribute|key|output|input|runtime|compile|register)\b',
+    re.IGNORECASE,
+)
+
+
 def filter_code_docs_negative(text: str) -> bool:
     """
-    Negative: Stack Overflow answer body — allow prose explanations,
-    exclude if it's mostly code.
+    Negative: informal technical explanation (Stack Overflow / reddit-technical style).
+    Requires at least one programming keyword so general Reddit posts are excluded.
+    Rejects code-heavy content (>30% code blocks by match count).
     """
     code_ratio = len(re.findall(r"```[\s\S]*?```|<code>[\s\S]*?</code>", text)) / max(1, len(text))
-    return code_ratio < 0.3 and len(text.split()) >= 40
+    return (code_ratio < 0.3
+            and len(text.split()) >= 40
+            and bool(_CODE_DOCS_TECH_KW.search(text)))
 
 
 # ── Register: bureaucratic (pile-of-law/daily_dialog) ────────────────────────
@@ -260,9 +274,9 @@ def filter_uncertainty_positive(text: str) -> bool:
 
 def filter_uncertainty_negative(text: str) -> bool:
     lowered = text.lower()
-    has_certainty = any(m in lowered for m in _CERTAINTY_MARKERS)
-    has_uncertainty = any(m in lowered for m in _UNCERTAINTY_MARKERS)
-    return has_certainty and not has_uncertainty
+    # Strong certainty signal; does not require absence of all uncertainty words
+    # (removing that constraint avoids scanning millions of records for rare matches)
+    return any(m in lowered for m in _CERTAINTY_MARKERS)
 
 
 # ── Semantic-abstract: deference (SciCite labels) ────────────────────────────
