@@ -34,7 +34,6 @@ results/auroc/
 results/linearity/
 results/nemenyi/
 results/icc/
-results/power_analysis.json
 results/bert_classifiers/
 results/scp/
 results/disentanglement/

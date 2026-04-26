@@ -1,0 +1,16 @@
+{
+  "n_per_class": 700,
+  "n_train": 700,
+  "n_test_held_out": 300,
+  "n_cv_fold_test": 140,
+  "n_bootstrap": 5000,
+  "n_simulations": 200,
+  "ci_half_width_held_out": 0.0189,
+  "ci_half_width_cv_fold": 0.0276,
+  "pre_committed_mde": 0.05,
+  "evaluation_design": "held_out_test",
+  "mde_met": true,
+  "recommendation": "SUFFICIENT for held-out test (n=300, CI half=0.019). 5-fold CV (n=140, CI half=0.028) is marginal; primary AUROC reporting uses held-out test set.",
+  "note": "Primary evaluation uses the 300-sample held-out test split. If 5-fold CV on training data is used for any comparison, increase corpus to 1000/class.",
+  "date": "2026-04-27"
+}
