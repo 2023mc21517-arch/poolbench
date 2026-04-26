@@ -48,8 +48,8 @@ ruff format poolbench/ scripts/
 
 ## Data policy
 
-- **Do not commit corpus JSONL files** — `data/` is gitignored. Users reproduce the corpus by running `scripts/dataset_builder.py`.
-- **Do not commit activation `.npy` files** — `results/activations/` is gitignored.
+- **Do not commit corpus JSONL files** — the pre-built corpus is released on HuggingFace Hub (`ayushi-agarwall/poolbench`). Download it with `huggingface-cli download ayushi-agarwall/poolbench --repo-type dataset --local-dir .`
+- **Do not commit activation `.npy` files** — these are also released on HuggingFace Hub and are too large for git.
 - **Do not commit model weights or HuggingFace tokens**.
 
 ## Pull requests

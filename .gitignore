@@ -17,7 +17,10 @@ htmlcov/
 coverage.xml
 
 # ── Project generated data ────────────────────────────────────────────────────
-# Corpus JSONL files (large — users must run scripts/dataset_builder.py to build)
+# Corpus JSONL files and activation .npy files are released publicly on
+# HuggingFace Hub (ayushi-agarwall/poolbench) — not stored in this git repo.
+# Download them with:
+#   huggingface-cli download ayushi-agarwall/poolbench --repo-type dataset --local-dir .
 data/corpora/*/
 !data/corpora/.gitkeep
 
@@ -25,7 +28,7 @@ data/corpora/*/
 data/raw/
 !data/raw/.gitkeep
 
-# Activation .npy files (very large — produced by scripts/run_model.py)
+# Activation .npy files (very large — released on HF Hub)
 results/activations/
 results/auroc/
 results/linearity/
@@ -33,10 +36,9 @@ results/nemenyi/
 results/icc/
 results/power_analysis.json
 results/bert_classifiers/
+results/scp/
+results/disentanglement/
 !results/.gitkeep
-
-# BERT classifier checkpoints (large)
-results/bert_classifiers/
 
 # ── Notebooks / IDE ───────────────────────────────────────────────────────────
 .ipynb_checkpoints/

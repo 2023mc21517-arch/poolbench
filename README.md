@@ -65,62 +65,57 @@ poolbench/
 ```bash
 git clone https://github.com/ayushi-agarwall/poolbench.git
 cd poolbench
-pip install -e ".[dev]"            # installs poolbench package + dev deps
+pip install -e ".[dev]"
 ```
 
-> **HuggingFace access**: `dataset_builder.py` uses the Llama-3 tokenizer for length enforcement. Login once:
-> ```bash
-> huggingface-cli login
-> ```
-> You need to accept the Llama-3 model licence at [meta-llama/Meta-Llama-3.1-8B](https://huggingface.co/meta-llama/Meta-Llama-3.1-8B).
+### 2. Download the pre-built artifacts (~5 minutes)
 
-### 2. Build the corpus (CPU only, ~2–4 hours total)
-
-Build each concept in sequence. Each one downloads its HuggingFace source dataset, filters, optionally rewrites, and saves `train/` + `test/` JSONL files:
+All corpus JSONL files, activation `.npy` files, and paper results are released on HuggingFace Hub:
 
 ```bash
-# One concept at a time (recommended — easier to resume)
-python scripts/dataset_builder.py --concept hedging
-python scripts/dataset_builder.py --concept causation
-# ... repeat for all 18 concepts
+# Install the HF CLI if needed
+pip install huggingface_hub
 
-# Or build all at once
-python scripts/dataset_builder.py --all
-
-# Dry-run first to check counts without saving
-python scripts/dataset_builder.py --concept hedging --dry-run
+# Download everything (corpus + activations + results)
+huggingface-cli download ayushi-agarwall/poolbench --repo-type dataset --local-dir .
 ```
 
-Each built concept produces:
+This populates:
 ```
 data/corpora/{concept}/
     train_pos.jsonl   (700 passages)
     train_neg.jsonl   (700 passages)
     test_pos.jsonl    (300 passages)
     test_neg.jsonl    (300 passages)
+
+results/activations/   # per-model .npy activation files
+results/auroc/         # paper AUROC JSON
+results/scp/           # paper SCP JSON
+results/disentanglement/
 ```
 
-### 3. Power analysis (CPU, ~2 minutes)
+You can also load the corpus directly in Python:
 
-Confirm that 300 test passages per class give tight enough AUROC CIs before running GPU experiments:
-
-```bash
-python scripts/power_analysis.py
-# Pass criterion: 95% CI half-width < 0.025
-# If it fails, rebuild with --n_train 1000 --n_test 400
+```python
+from datasets import load_dataset
+ds = load_dataset("ayushi-agarwall/poolbench", name="hedging")
 ```
 
-### 4. Run experiments (GPU required)
+> **Rebuilding from source (optional — for verification or new models):**
+> `dataset_builder.py` uses the Llama-3 tokenizer, so you will need a HuggingFace account with the Llama-3 licence accepted:
+> ```bash
+> huggingface-cli login
+> python scripts/dataset_builder.py --all   # ~2–4 hours, CPU only
+> ```
+
+### 3. Run experiments on a new model (GPU required)
 
 ```bash
-# Single model
-python scripts/run_model.py --model llama3_8b --device cuda:0
+# Single model — extracts activations then runs all probes
+python scripts/run_model.py --model <your_model_id> --device cuda:0
 
-# All 7 models (run sequentially on one GPU, or in parallel across GPUs)
-python scripts/run_model.py --all --device cuda:0
-
-# Skip activation extraction if already done
-python scripts/run_model.py --model llama3_8b --skip_extraction
+# Skip extraction if activations already exist
+python scripts/run_model.py --model <your_model_id> --skip_extraction
 
 # Nemenyi significance test across all models (run after all models complete)
 python scripts/run_model.py --nemenyi_only
@@ -209,9 +204,24 @@ Five methods for constructing the concept direction vector **d** from activation
 
 ## Reproducing the paper
 
+Pre-built artifacts (corpus, activations, results) are on HuggingFace — you do **not** need to rebuild the corpus or re-run all 7 models to reproduce the numbers:
+
+```bash
+# 1. Download artifacts
+huggingface-cli download ayushi-agarwall/poolbench --repo-type dataset --local-dir .
+
+# 2. Re-run probing only (fast — no GPU extraction needed)
+python scripts/run_model.py --all --skip_extraction
+
+# 3. Nemenyi significance test
+python scripts/run_model.py --nemenyi_only
+```
+
+To reproduce from raw source data (full re-build, ~2–4 hours CPU + GPU time per model):
+
 ```bash
 # Full reproduction (one GPU, sequential)
-bash scripts/reproduce.sh      # see scripts/reproduce.sh for the exact command sequence
+bash scripts/reproduce.sh
 
 # Or step by step:
 python scripts/dataset_builder.py --all
