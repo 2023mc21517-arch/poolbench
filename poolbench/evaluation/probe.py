@@ -197,12 +197,12 @@ def build_nemenyi_auroc_matrix(
     Returns float32 ndarray, NaN for missing cells.
     """
     n_strats  = len(strategy_ids)
-    cols       = [f"{m}_{c}" for m in model_names for c in concept_names]
-    n_cols     = len(cols)
+    # Keep (model, concept) pairs explicitly to avoid split-on-underscore ambiguity
+    col_pairs  = [(m, c) for m in model_names for c in concept_names]
+    n_cols     = len(col_pairs)
     mat        = np.full((n_strats, n_cols), np.nan, dtype=np.float32)
 
-    for col_i, col_key in enumerate(cols):
-        model, concept = col_key.split("_", 1)
+    for col_i, (model, concept) in enumerate(col_pairs):
         model_results  = auroc_results_per_model.get(model, {})
         for row_i, strat in enumerate(strategy_ids):
             cell_key  = f"{concept}_{strat}"
@@ -444,29 +444,50 @@ def compute_layer_icc(layer_aurocs_per_concept: dict[str, list[float]],
       "icc_per_concept": {concept_name: float},
     }
     """
-    icc_scores: dict[str, float] = {}
+    # Build subjects (concepts) × raters (layers) matrix.
+    # Each concept must have the same number of layer AUROC values; drop concepts
+    # that have fewer than 2 layers so we always have a valid within-subjects structure.
+    all_ks   = [len(v) for v in layer_aurocs_per_concept.values()]
+    k_mode   = int(np.round(np.median(all_ks))) if all_ks else 1
+    # Keep only concepts with the modal layer count
+    valid    = {c: v for c, v in layer_aurocs_per_concept.items() if len(v) == k_mode}
 
-    for concept, aucs in layer_aurocs_per_concept.items():
-        if len(aucs) < 2:
-            icc_scores[concept] = 1.0
-            continue
-        arr = np.array(aucs, dtype=np.float64)   # (k,)
-        k   = len(arr)
-        grand_mean = arr.mean()
-        ss_between = k * ((arr - grand_mean) ** 2).sum()  # simplified one-rater, n=1
-        # With n=1 sample per rater, we use total variance as MS_within proxy
-        ss_within  = ((arr - grand_mean) ** 2).sum()
-        if ss_within < 1e-10:
-            icc_scores[concept] = 1.0
+    icc_scores: dict[str, float] = {}
+    if not valid or k_mode < 2:
+        # Can't compute meaningful ICC — default to 0 (conservative: no correction)
+        for concept in layer_aurocs_per_concept:
+            icc_scores[concept] = 0.0
+    else:
+        # One-way random effects ICC(1,1) computed over the full (n_concepts × k_layers)
+        # matrix following Shrout & Fleiss (1979), eq. 1:
+        #   ICC = (MS_B - MS_W) / (MS_B + (k-1)*MS_W)
+        # where MS_B = between-subject (concept) mean squares,
+        #       MS_W = within-subject (across-layer residual) mean squares.
+        mat        = np.array(list(valid.values()), dtype=np.float64)  # (n, k)
+        n, k       = mat.shape
+        grand_mean = mat.mean()
+        row_means  = mat.mean(axis=1)   # (n,)
+
+        ss_between = k * np.sum((row_means - grand_mean) ** 2)
+        ss_within  = np.sum((mat - row_means[:, None]) ** 2)
+
+        df_between = n - 1
+        df_within  = n * (k - 1)
+
+        if df_between == 0 or df_within == 0 or ss_within < 1e-10:
+            icc_val = 1.0
         else:
-            icc  = (ss_between - ss_within) / (ss_between + (k - 1) * ss_within + 1e-9)
-            icc_scores[concept] = float(np.clip(icc, 0.0, 1.0))
+            ms_b    = ss_between / df_between
+            ms_w    = ss_within  / df_within
+            icc_val = float(np.clip((ms_b - ms_w) / (ms_b + (k - 1) * ms_w + 1e-9),
+                                    0.0, 1.0))
+
+        for concept in layer_aurocs_per_concept:
+            icc_scores[concept] = icc_val   # same matrix-level ICC for all concepts
 
     mean_icc = float(np.mean(list(icc_scores.values()))) if icc_scores else 0.0
-    # Assume same k for all (use first concept's layer count)
-    all_ks = [len(v) for v in layer_aurocs_per_concept.values()]
-    k_avg  = int(np.round(np.mean(all_ks))) if all_ks else 1
-    N_eff  = int(n_base / (1 + (k_avg - 1) * mean_icc + 1e-9))
+    k_avg    = k_mode
+    N_eff    = int(n_base / (1 + (k_avg - 1) * mean_icc + 1e-9))
 
     return {
         "mean_icc":         mean_icc,

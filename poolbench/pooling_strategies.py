@@ -1,10 +1,10 @@
 """
 poolbench/pooling_strategies.py
-All 18 ranked pooling strategies + 1 oracle strategy.
+All 19 ranked pooling strategies + 1 oracle strategy.
 Strategy registry and batch application helper.
 
-18 ranked strategies on the main leaderboard (17 unsupervised + 1 supervised):
-  P1, P2, P3_CLS (3) + A1–A3 (3) + W1–W4 (4) + S1–S3 (3) + L1–L5 (5) = 18
+19 ranked strategies on the main leaderboard (18 unsupervised + 1 supervised):
+  P1, P2, P3_CLS (3) + A1–A4_norm (4) + W1–W4 (4) + S1–S3 (3) + L1–L5 (5) = 19
 
 Off-leaderboard (oracle tier):
   G1_IxG  (requires backward pass — two-pass oracle)
@@ -143,7 +143,7 @@ def pool_attention_weighted(h: np.ndarray, attn_weights: np.ndarray | None) -> n
 def pool_SIF_adapted(h: np.ndarray, token_ids: list[int], unigram_probs: dict,
                      a: float = 1e-3) -> np.ndarray:
     """
-    S3 — Smoothed Inverse Frequency pooling (Arora et al. 2017).
+    S2 — Smoothed Inverse Frequency pooling (Arora et al. 2017).
     Weight each token by a / (a + p(token)) where p(token) is its corpus unigram prob.
     Tokens with low unigram probability (rare words) receive higher weight.
     First-PC subtraction is done at the corpus level in compute_all_pooling_strategies,

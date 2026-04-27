@@ -140,12 +140,7 @@ class _LayerCaptureHook:
 def _get_layer_module(model, model_name: str, layer_idx: int):
     """Return the transformer block at layer_idx for arbitrary architectures."""
     try:
-        # Llama, Mistral, Qwen — model.model.layers[i]
-        return model.model.layers[layer_idx]
-    except AttributeError:
-        pass
-    try:
-        # Gemma-2 — same
+        # Llama, Mistral, Qwen, Gemma-2 — model.model.layers[i]
         return model.model.layers[layer_idx]
     except AttributeError:
         pass
