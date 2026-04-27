@@ -88,13 +88,19 @@ def clean_text(text: str) -> str:
 
 def has_seed_words(text: str, seed_words: list[str]) -> bool:
     """
-    Return True if the text contains any seed word (case-insensitive).
+    Return True if the text contains any seed word at a word boundary
+    (case-insensitive).  Word-boundary matching prevents substring false
+    positives such as ``ugh`` matching ``through`` or ``enough``.
     Used to verify that concept-negative passages are clean.
     """
     if not seed_words:
         return False
-    lowered = text.lower()
-    return any(sw.lower() in lowered for sw in seed_words)
+    import re
+    for sw in seed_words:
+        pattern = re.compile(r"\b" + re.escape(sw.lower()) + r"\b", re.IGNORECASE)
+        if pattern.search(text):
+            return True
+    return False
 
 
 # ── Domain tagging helpers ────────────────────────────────────────────────────

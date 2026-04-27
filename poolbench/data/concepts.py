@@ -50,6 +50,11 @@ CONCEPTS = {
             "ugh", "frustrated", "come on", "ridiculous",
             "why won't", "again", "seriously",
         ],
+        # "ugh" is a substring of "through"/"enough"/"although".
+        # "again" and "seriously" are too common in neutral text.
+        # Use word-boundary matching on the discriminative subset only.
+        "contamination_markers": ["frustrated", "come on", "ridiculous", "why won't", "ugh"],
+
         "positive_def": "Passage expresses frustration or exasperation",
         "negative_def": "Same content expressed neutrally",
         "hf_source": "google-research-datasets/go_emotions",
@@ -131,6 +136,10 @@ CONCEPTS = {
             "assuming", "given that", "in case", "otherwise",
         ],
         "seed_words": ["if", "unless", "provided that", "assuming", "given that"],
+        # "if" appears in ~73 % of all text; exclude it from contamination
+        # detection to avoid mass-flagging legitimate rewritten negatives.
+        "contamination_markers": ["unless", "provided that", "given that", "on condition that", "in case", "otherwise,"],
+
         "positive_def": "Passage explicitly encodes an if-then conditional relationship",
         "negative_def": "Same content with conditional rewritten as a direct statement",
         "hf_source": "cestwc/conj_nli",
@@ -189,6 +198,11 @@ CONCEPTS = {
             "unclear", "uncertain", "may", "it is possible",
             "debated", "no consensus", "unknown",
         ],
+        # "may" is a modal auxiliary used in ~21 % of all academic text
+        # without conveying epistemic uncertainty. "unknown" is also common.
+        # Restrict contamination detection to the specific multi-word markers.
+        "contamination_markers": ["unclear", "uncertain", "it is possible", "debated", "no consensus"],
+
         "positive_def": "Epistemic uncertainty expressed — writer does not know the answer",
         "negative_def": "Writer is confident and certain about the same topic",
         "hf_source": "scientific_papers",
@@ -200,6 +214,10 @@ CONCEPTS = {
             "according to", "as noted by", "following", "prior work",
             "as demonstrated by", "established by",
         ],
+        # "following" matches "the following section/results" (prep/adjective
+        # sense), not citation deference. Drop it from contamination check.
+        "contamination_markers": ["according to", "as noted by", "prior work", "as demonstrated by", "established by"],
+
         "positive_def": "Writer defers to authority, convention, or another person's judgment",
         "negative_def": "Writer asserts their own view confidently without deferring",
         "hf_source": "allenai/scicite",
@@ -212,6 +230,10 @@ CONCEPTS = {
             "plan", "will", "intend", "next step", "going to",
             "goal", "objective", "strategy",
         ],
+        # "will" is a future auxiliary (~25 % of any text); "goal" is
+        # too common in academic/business writing to be discriminative.
+        "contamination_markers": ["plan", "intend", "next step", "going to", "objective", "strategy"],
+
         "positive_def": "Passage exhibits future-directed planning and forethought",
         "negative_def": "Passage describes past actions or current state without future planning",
         "hf_source": "tasksource/bigbench",

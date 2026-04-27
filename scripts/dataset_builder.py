@@ -181,7 +181,7 @@ def split_and_save(
                     pos_passages, neg_passages,
                     pos_domain_list_raw, neg_domain_list_raw, matched_pair_ids
                 )
-                if not any(sw in n.lower() for sw in _sw_lower)
+                if not has_seed_words(n, _sw_lower)
             ]
             n_removed = len(pos_passages) - len(kept)
             if n_removed:
@@ -198,7 +198,7 @@ def split_and_save(
                 matched_pair_ids = []
         else:
             clean = [(n, d) for n, d in zip(neg_passages, neg_domain_list_raw)
-                     if not any(sw in n.lower() for sw in _sw_lower)]
+                     if not has_seed_words(n, _sw_lower)]
             n_removed = len(neg_passages) - len(clean)
             if n_removed:
                 print(f"  [seed-clean] {concept}: removed {n_removed} neg passages "
@@ -1288,7 +1288,7 @@ def main():
             corpora_dir=args.corpora_dir,
             dry_run=args.dry_run,
             matched_pair_ids=pair_ids,
-            seed_words=CONCEPTS[concept].get("seed_words", []),
+            seed_words=CONCEPTS[concept].get("contamination_markers", CONCEPTS[concept].get("seed_words", [])),
         )
 
         if not args.dry_run:
