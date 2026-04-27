@@ -1,0 +1,72 @@
+{
+  "_comment": "Official PoolBench v1 results. Model identifiers anonymized for review.",
+  "_note": "Cells marked null are pending or excluded (see paper Table 1 footnotes).",
+  "version": "1.0",
+  "date": "2026-04-28",
+  "construction_method": "C1_difmean",
+  "strategies": [
+    "P1_last_token", "P2_first_token", "P3_CLS",
+    "A1_mean", "A2_max", "A3_random", "A4_norm",
+    "W1_mean_last_4", "W2_mean_last_8", "W3_mean_last_16", "W4_hierarchical",
+    "S1_attention_weighted", "S2_SIF", "S3_ITI_exact",
+    "L1_POS_filtered", "L2_dependency_rel", "L3_named_entity",
+    "L4_subword_root", "L5_SVO"
+  ],
+  "models": {
+    "model_A": {
+      "architecture": "decoder_only",
+      "parameters": "8B",
+      "mean_auroc_per_strategy": {
+        "P1_last_token": null,
+        "P2_first_token": null,
+        "P3_CLS": null,
+        "A1_mean": null,
+        "A2_max": null,
+        "A3_random": null,
+        "A4_norm": null,
+        "W1_mean_last_4": null,
+        "W2_mean_last_8": null,
+        "W3_mean_last_16": null,
+        "W4_hierarchical": null,
+        "S1_attention_weighted": null,
+        "S2_SIF": null,
+        "S3_ITI_exact": null,
+        "L1_POS_filtered": null,
+        "L2_dependency_rel": null,
+        "L3_named_entity": null,
+        "L4_subword_root": null,
+        "L5_SVO": null
+      }
+    },
+    "model_B": {
+      "architecture": "decoder_only",
+      "parameters": "9B",
+      "mean_auroc_per_strategy": {}
+    },
+    "model_C": {
+      "architecture": "decoder_only",
+      "parameters": "7B",
+      "mean_auroc_per_strategy": {}
+    },
+    "model_D": {
+      "architecture": "decoder_only",
+      "parameters": "7B",
+      "mean_auroc_per_strategy": {}
+    },
+    "model_E": {
+      "architecture": "encoder_decoder",
+      "parameters": "3B",
+      "mean_auroc_per_strategy": {}
+    },
+    "model_F": {
+      "architecture": "ssm",
+      "parameters": "2.7B",
+      "mean_auroc_per_strategy": {}
+    },
+    "model_G": {
+      "architecture": "encoder_only",
+      "parameters": "110M",
+      "mean_auroc_per_strategy": {}
+    }
+  }
+}

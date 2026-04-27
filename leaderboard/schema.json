@@ -1,0 +1,99 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PoolBench Leaderboard Submission",
+  "description": "Schema for a valid community strategy submission to the PoolBench leaderboard.",
+  "type": "object",
+  "required": ["strategy_id", "family", "supervision", "source", "description", "results"],
+  "additionalProperties": false,
+  "properties": {
+    "strategy_id": {
+      "type": "string",
+      "pattern": "^[A-Z0-9]+_[a-z0-9_]+$",
+      "description": "Unique strategy identifier, e.g. W5_position_weighted",
+      "examples": ["W5_position_weighted", "L6_verb_only"]
+    },
+    "family": {
+      "type": "string",
+      "enum": [
+        "position_anchored",
+        "uniform_aggregation",
+        "window",
+        "saliency_weighted",
+        "structural_linguistic",
+        "oracle",
+        "other"
+      ]
+    },
+    "supervision": {
+      "type": "string",
+      "enum": ["unsupervised", "supervised"]
+    },
+    "source": {
+      "type": "string",
+      "enum": ["community", "published"],
+      "description": "Use 'published' only if this is a direct implementation of a prior paper."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 500,
+      "description": "Plain-English description of the strategy."
+    },
+    "citation": {
+      "type": "string",
+      "description": "BibTeX key or free-form citation if implementing a prior method."
+    },
+    "code_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "URL to the implementation (GitHub file, notebook, etc.)"
+    },
+    "results": {
+      "type": "object",
+      "description": "Per-model results. At least one model required.",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "llama3_8b":   { "$ref": "#/definitions/model_results" },
+        "gemma2_9b":   { "$ref": "#/definitions/model_results" },
+        "mistral_7b":  { "$ref": "#/definitions/model_results" },
+        "qwen25_7b":   { "$ref": "#/definitions/model_results" },
+        "flan_t5_xl":  { "$ref": "#/definitions/model_results" },
+        "mamba2_2b":   { "$ref": "#/definitions/model_results" },
+        "bert_base":   { "$ref": "#/definitions/model_results" }
+      }
+    }
+  },
+  "definitions": {
+    "model_results": {
+      "type": "object",
+      "required": ["mean_auroc"],
+      "additionalProperties": false,
+      "properties": {
+        "mean_auroc": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Mean AUROC across all 18 concepts."
+        },
+        "per_concept": {
+          "type": "object",
+          "description": "Optional: AUROC per concept.",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["auroc"],
+            "properties": {
+              "auroc":   { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+              "ci_low":  { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+              "ci_high": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
+            }
+          }
+        },
+        "layer": {
+          "type": "integer",
+          "description": "Which layer was used for extraction (0-indexed)."
+        }
+      }
+    }
+  }
+}

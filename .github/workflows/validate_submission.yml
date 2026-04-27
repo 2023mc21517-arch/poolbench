@@ -1,0 +1,92 @@
+name: Validate Community Submission
+
+on:
+  pull_request:
+    paths:
+      - "leaderboard/community/**.json"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  validate-submission:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install validation dependencies
+        run: pip install jsonschema
+
+      - name: Find changed JSON files
+        id: changed
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- 'leaderboard/community/*.json' | tr '\n' ' ')
+          echo "files=$FILES" >> "$GITHUB_OUTPUT"
+
+      - name: Validate each submission against schema
+        run: |
+          set -e
+          SCHEMA="leaderboard/schema.json"
+          FAILED=0
+          for f in ${{ steps.changed.outputs.files }}; do
+            echo "Validating: $f"
+            python - <<EOF
+          import json, jsonschema, sys
+          schema  = json.load(open("$SCHEMA"))
+          payload = json.load(open("$f"))
+          try:
+              jsonschema.validate(payload, schema)
+              print("  PASS: $f")
+          except jsonschema.ValidationError as e:
+              print(f"  FAIL: {e.message}")
+              sys.exit(1)
+          EOF
+            if [ $? -ne 0 ]; then FAILED=1; fi
+          done
+          if [ "$FAILED" -eq 1 ]; then
+            echo "One or more submissions failed schema validation."
+            exit 1
+          fi
+
+      - name: Check strategy_id uniqueness
+        run: |
+          python - <<'EOF'
+          import glob, json, sys, collections
+
+          all_ids = []
+          for fp in glob.glob("leaderboard/community/*.json"):
+              if fp.endswith("_example.json"):
+                  continue
+              data = json.load(open(fp))
+              sid  = data.get("strategy_id", "")
+              all_ids.append((sid, fp))
+
+          counts = collections.Counter(sid for sid, _ in all_ids)
+          dupes  = [sid for sid, cnt in counts.items() if cnt > 1]
+          if dupes:
+              print(f"Duplicate strategy_id(s): {dupes}")
+              sys.exit(1)
+          print(f"All {len(all_ids)} strategy IDs are unique.")
+          EOF
+
+      - name: Post validation summary comment
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const outcome = "${{ job.status }}";
+            const emoji   = outcome === "success" ? "✅" : "❌";
+            const body    = `${emoji} **PoolBench submission validation** — ${outcome}\n\nSchema and strategy_id uniqueness checks complete.`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });

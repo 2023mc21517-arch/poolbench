@@ -150,6 +150,7 @@ def test_all_ranked_in_registry():
 
 
 def test_registry_callables():
-    for name, (fn, family) in STRATEGY_REGISTRY.items():
+    for name, tup in STRATEGY_REGISTRY.items():
+        fn, family = tup[0], tup[1]
         assert callable(fn), f"{name}: pool function is not callable"
         assert isinstance(family, str), f"{name}: family must be a string"

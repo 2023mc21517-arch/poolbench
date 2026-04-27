@@ -13,7 +13,7 @@ keywords = ["nlp", "representation-learning", "pooling", "benchmarks", "mechanis
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -42,13 +42,13 @@ dev = [
 all = ["poolbench[sae,dev]"]
 
 [project.urls]
-Homepage      = "https://github.com/ayushi-agarwall/poolbench"
-Repository    = "https://github.com/ayushi-agarwall/poolbench"
-"Bug Tracker" = "https://github.com/ayushi-agarwall/poolbench/issues"
+Homepage      = "https://github.com/poolbench-anon/poolbench"
+Repository    = "https://github.com/poolbench-anon/poolbench"
+"Bug Tracker" = "https://github.com/poolbench-anon/poolbench/issues"
 Paper         = "https://arxiv.org/abs/XXXX.XXXXX"
 
 [tool.hatch.build.targets.wheel]
-packages = ["poolbench"]
+packages = ["poolbench", "poolbench.data", "poolbench.construction", "poolbench.strategies", "poolbench.evaluation"]
 
 # ── Ruff linting ──────────────────────────────────────────────────────────────
 [tool.ruff]

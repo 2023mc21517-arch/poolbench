@@ -1,0 +1,36 @@
+{
+  "_comment": "Example community submission. Fill in real values and rename to <your_strategy_id>.json",
+  "strategy_id": "W5_position_weighted",
+  "family": "window",
+  "supervision": "unsupervised",
+  "source": "community",
+  "description": "Weight each token by its normalised position index (later tokens receive higher weight), then average. Motivated by the recency bias observed in decoder-only LMs where later tokens accumulate more contextual information.",
+  "citation": "original",
+  "code_url": "https://github.com/your-username/poolbench-strategies/blob/main/w5_position_weighted.py",
+  "results": {
+    "llama3_8b": {
+      "mean_auroc": 0.742,
+      "layer": 16,
+      "per_concept": {
+        "hedging":             { "auroc": 0.81, "ci_low": 0.77, "ci_high": 0.85 },
+        "pos_sentiment":       { "auroc": 0.79, "ci_low": 0.75, "ci_high": 0.83 },
+        "causation":           { "auroc": 0.70, "ci_low": 0.65, "ci_high": 0.75 },
+        "contrast":            { "auroc": 0.68, "ci_low": 0.63, "ci_high": 0.73 },
+        "academic_tone":       { "auroc": 0.77, "ci_low": 0.73, "ci_high": 0.81 },
+        "toxicity":            { "auroc": 0.76, "ci_low": 0.72, "ci_high": 0.80 },
+        "legal_formality":     { "auroc": 0.71, "ci_low": 0.66, "ci_high": 0.76 },
+        "math_certainty":      { "auroc": 0.73, "ci_low": 0.68, "ci_high": 0.78 },
+        "frustration":         { "auroc": 0.69, "ci_low": 0.64, "ci_high": 0.74 },
+        "numerical_precision": { "auroc": 0.75, "ci_low": 0.71, "ci_high": 0.79 },
+        "conditionality":      { "auroc": 0.70, "ci_low": 0.65, "ci_high": 0.75 },
+        "negation_density":    { "auroc": 0.72, "ci_low": 0.67, "ci_high": 0.77 },
+        "code_docs":           { "auroc": 0.78, "ci_low": 0.74, "ci_high": 0.82 },
+        "bureaucratic":        { "auroc": 0.74, "ci_low": 0.70, "ci_high": 0.78 },
+        "uncertainty":         { "auroc": 0.71, "ci_low": 0.66, "ci_high": 0.76 },
+        "deference":           { "auroc": 0.69, "ci_low": 0.64, "ci_high": 0.74 },
+        "planning":            { "auroc": 0.73, "ci_low": 0.68, "ci_high": 0.78 },
+        "depression":          { "auroc": 0.77, "ci_low": 0.73, "ci_high": 0.81 }
+      }
+    }
+  }
+}
