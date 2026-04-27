@@ -314,7 +314,7 @@ def extract_activations_for_model(
 
             for split in ("pos", "neg"):
                 for partition in ("test",):   # AUROC evaluated on test split only
-                    jsonl_path = concept_dir / partition / f"{split}.jsonl"
+                    jsonl_path = concept_dir / f"{partition}_{split}.jsonl"
                     if not jsonl_path.exists():
                         print(f"  [extract] {concept_name}/{split}/{partition}: not found")
                         continue

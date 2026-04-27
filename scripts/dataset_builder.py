@@ -106,6 +106,7 @@ def split_and_save(
     corpora_dir: Path,
     dry_run: bool = False,
     matched_pair_ids: Optional[list[str]] = None,  # parallel list of pair IDs if matched-pair
+    seed_words: Optional[list[str]] = None,          # concept seed words — filter neg contamination
 ) -> None:
     """
     Shuffle, split into train/test, build JSONL records, and save.
@@ -115,10 +116,104 @@ def split_and_save(
     tok = get_tokenizer()
     total_needed = n_train + n_test
 
+    # ── Deduplication + integrity checks (integrated build-time audit) ────────
+    import hashlib as _hs
+    def _md5(t: str) -> str:
+        return _hs.md5(t.encode()).hexdigest()
+
+    pos_domain_list_raw = (pos_domain if isinstance(pos_domain, list)
+                           else [pos_domain] * len(pos_passages))
+    neg_domain_list_raw = (neg_domain if isinstance(neg_domain, list)
+                           else [neg_domain] * len(neg_passages))
+
+    if matched_pair_ids is not None:
+        # Matched-pair: dedup full pairs jointly by positive text hash.
+        # NEVER dedup neg independently — that breaks pair alignment because neg
+        # is a deterministic rewrite of pos and index correspondence must be preserved.
+        seen_hashes: set = set()
+        _np, _nn, _dp, _dn, _ids = [], [], [], [], []
+        for p, n, dp, dn, pid in zip(
+            pos_passages, neg_passages,
+            pos_domain_list_raw, neg_domain_list_raw, matched_pair_ids
+        ):
+            h = _md5(p)
+            if h not in seen_hashes:
+                seen_hashes.add(h)
+                _np.append(p); _nn.append(n); _dp.append(dp); _dn.append(dn); _ids.append(pid)
+        pos_passages, neg_passages = _np, _nn
+        pos_domain_list_raw, neg_domain_list_raw = _dp, _dn
+        matched_pair_ids = _ids
+    else:
+        # Independent sampling: dedup each class, then cross-class dedup to
+        # remove label-ambiguous passages (same text in both pos and neg).
+        def _dedup_list(passages, domains):
+            seen: set = set()
+            out_p, out_d = [], []
+            for p, d in zip(passages, domains):
+                h = _md5(p)
+                if h not in seen:
+                    seen.add(h)
+                    out_p.append(p); out_d.append(d)
+            return out_p, out_d
+
+        pos_passages, pos_domain_list_raw = _dedup_list(pos_passages, pos_domain_list_raw)
+        neg_passages, neg_domain_list_raw = _dedup_list(neg_passages, neg_domain_list_raw)
+
+        pos_hashes = {_md5(p) for p in pos_passages}
+        cross_n = sum(1 for n in neg_passages if _md5(n) in pos_hashes)
+        if cross_n:
+            print(f"  [dedup] {concept}: removing {cross_n} label-ambiguous "
+                  f"neg passages that also appear as pos")
+            filtered = [(n, d) for n, d in zip(neg_passages, neg_domain_list_raw)
+                        if _md5(n) not in pos_hashes]
+            neg_passages = [x[0] for x in filtered]
+            neg_domain_list_raw = [x[1] for x in filtered]
+
+    # ── Seed-word contamination enforcement ───────────────────────────────────
+    # Negative passages must NOT contain positive-class seed words.
+    # Enforced here at construction time so contaminated records never reach disk.
+    if seed_words:
+        _sw_lower = [s.lower() for s in seed_words]
+        if matched_pair_ids is not None:
+            kept = [
+                (p, n, dp, dn, pid)
+                for p, n, dp, dn, pid in zip(
+                    pos_passages, neg_passages,
+                    pos_domain_list_raw, neg_domain_list_raw, matched_pair_ids
+                )
+                if not any(sw in n.lower() for sw in _sw_lower)
+            ]
+            n_removed = len(pos_passages) - len(kept)
+            if n_removed:
+                print(f"  [seed-clean] {concept}: removed {n_removed} matched pairs "
+                      f"where neg contained seed words")
+            if kept:
+                pos_passages, neg_passages, pos_domain_list_raw, neg_domain_list_raw, matched_pair_ids = (
+                    [x[0] for x in kept], [x[1] for x in kept],
+                    [x[2] for x in kept], [x[3] for x in kept], [x[4] for x in kept]
+                )
+            else:
+                pos_passages, neg_passages = [], []
+                pos_domain_list_raw, neg_domain_list_raw = [], []
+                matched_pair_ids = []
+        else:
+            clean = [(n, d) for n, d in zip(neg_passages, neg_domain_list_raw)
+                     if not any(sw in n.lower() for sw in _sw_lower)]
+            n_removed = len(neg_passages) - len(clean)
+            if n_removed:
+                print(f"  [seed-clean] {concept}: removed {n_removed} neg passages "
+                      f"containing seed words")
+            neg_passages = [x[0] for x in clean]
+            neg_domain_list_raw = [x[1] for x in clean]
+
+    # Rebuild domain inputs as lists for uniform downstream handling
+    pos_domain = pos_domain_list_raw
+    neg_domain = neg_domain_list_raw
+
     if len(pos_passages) < total_needed or len(neg_passages) < total_needed:
         print(
             f"  [WARNING] {concept}: only {len(pos_passages)} pos / "
-            f"{len(neg_passages)} neg available (need {total_needed} each). "
+            f"{len(neg_passages)} neg available after dedup (need {total_needed} each). "
             "Corpus will be smaller than target — see README for fallback steps."
         )
 
@@ -198,85 +293,6 @@ def split_and_save(
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Shared streaming helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _stream_rewrite_pairs(
-    ds_name: str,
-    config,
-    field: str,
-    domain: str,
-    filter_positive_fn,
-    rewriter_fn,
-    n_needed: int,
-    tok,
-    pair_prefix: str,
-    start_counter: int = 0,
-) -> tuple[list[str], list[str], list[str], list[str], list[str]]:
-    """
-    Stream a dataset and build matched rewrite-pairs.
-    Returns (pos_texts, neg_texts, pos_domains, neg_domains, pair_ids).
-    """
-    from datasets import load_dataset
-    from poolbench.utils import is_length_matched
-    ds = load_dataset(ds_name, config, split="train", streaming=True)
-    pos, neg, p_dom, n_dom, pair_ids = [], [], [], [], []
-    counter = start_counter
-    for ex in ds:
-        text = clean_text(ex.get(field, "") or "")
-        if not text or not is_valid_length(text, tok):
-            continue
-        if not filter_positive_fn(text):
-            continue
-        rewritten = rewriter_fn(text)
-        if rewritten is None:
-            continue
-        if not is_valid_length(rewritten, tok):
-            continue
-        if not is_length_matched(text, rewritten, tok):
-            continue
-        pos.append(text)
-        neg.append(rewritten)
-        p_dom.append(domain)
-        n_dom.append(domain)
-        pair_ids.append(f"{pair_prefix}_{counter:05d}")
-        counter += 1
-        if counter - start_counter >= n_needed:
-            break
-    return pos, neg, p_dom, n_dom, pair_ids
-
-
-def _stream_independent(
-    ds_name: str,
-    config,
-    field: str,
-    domain: str,
-    filter_fn,
-    n_needed: int,
-    tok,
-) -> tuple[list[str], list[str]]:
-    """
-    Stream a dataset and collect passages passing filter_fn.
-    Returns (texts, domains).
-    """
-    from datasets import load_dataset
-    ds = load_dataset(ds_name, config, split="train", streaming=True)
-    texts, domains = [], []
-    for ex in ds:
-        text = clean_text(ex.get(field, "") or "")
-        if not text or not is_valid_length(text, tok):
-            continue
-        if filter_fn(text):
-            texts.append(text)
-            domains.append(domain)
-        if len(texts) >= n_needed:
-            break
-    return texts, domains
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Per-concept builders
-# Each builder returns (pos_passages, neg_passages, pos_domains, neg_domains,
-#                       matched_pair_ids_or_None)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _stream_rewrite_pairs(
@@ -618,7 +634,7 @@ def build_toxicity(n_total: int):
             continue
         if label == 0 and _HOSTILE_RE.search(text) and len(pos) < n_total:
             pos.append(text); p_dom.append("review")
-        elif label == 4 and _POSITIVE_RE.search(text) and len(neg) < n_total:
+        elif label == 4 and _POSITIVE_RE.search(text) and not _HOSTILE_RE.search(text) and len(neg) < n_total:
             neg.append(text); n_dom.append("review")
         if len(pos) >= n_total and len(neg) >= n_total:
             break
@@ -791,8 +807,8 @@ def build_conditionality(n_total: int):
 
 def build_academic_tone(n_total: int):
     """
-    3 domains: academic (ArXiv pos), legal (SCOTUS pos), social (Reddit neg), news (CC-News neg).
-    Independent samples.
+    5 domains: academic (ArXiv pos), legal (SCOTUS pos), biomedical (PubMed pos),
+    social (Reddit neg), news (CC-News neg), review (Yelp neg). Independent samples.
     """
     tok = get_tokenizer()
     n_sec = n_total // 3
@@ -810,6 +826,11 @@ def build_academic_tone(n_total: int):
                                    filter_academic_positive, n_sec, tok, chunk_long_docs=True)
     pos += p2; p_dom += pd2
 
+    # Positives: PubMed abstracts (biomedical — formal academic biomedical text)
+    p3, pd3 = _stream_independent("ccdv/pubmed-summarization", None, "abstract",
+                                   "biomedical", filter_academic_positive, n_sec, tok)
+    pos += p3; p_dom += pd3
+
     # Negatives: Reddit (social)
     print("  Loading Reddit for academic_tone negatives ...")
     n1, nd1 = _stream_independent("sentence-transformers/reddit", None, "body",
@@ -821,25 +842,41 @@ def build_academic_tone(n_total: int):
                                    filter_academic_negative, n_sec, tok, chunk_long_docs=True)
     neg += n2; n_dom += nd2
 
+    # Negatives: Yelp reviews (review domain — informal consumer text, clearly non-academic)
+    n3, nd3 = _stream_independent("Yelp/yelp_review_full", None, "text",
+                                   "review", filter_academic_negative, n_sec, tok)
+    neg += n3; n_dom += nd3
+
     return pos, neg, p_dom, n_dom, None
 
 
 def build_code_docs(n_total: int):
     """
-    3 domains: code (CodeSearchNet), social (Reddit tech), news (CC-News tech).
-    Independent samples.
+    5 domains: code (CodeSearchNet pos), academic_cs (ArXiv pos), biomedical (PubMed pos),
+    social (Reddit neg), news (CC-News neg), legal (SCOTUS neg). Independent samples.
     """
     tok = get_tokenizer()
     n_sec = n_total // 3
 
     pos, neg, p_dom, n_dom = [], [], [], []
 
-    # Positives: CodeSearchNet Python
+    # Positives: CodeSearchNet Python docstrings (code domain)
     print("  Loading Nan-Do/code-search-net-python for code_docs ...")
     p1, pd1 = _stream_independent("Nan-Do/code-search-net-python", None,
                                    "docstring", "code",
                                    filter_code_docs_positive, n_total, tok)
     pos += p1; p_dom += pd1
+
+    # Positives: ArXiv CS abstracts (academic_cs — structured algorithm/method descriptions)
+    p2, pd2 = _stream_independent("gfissore/arxiv-abstracts-2021", None, "abstract",
+                                   "academic_cs", filter_code_docs_positive, n_sec, tok)
+    pos += p2; p_dom += pd2
+
+    # Positives: PubMed articles (biomedical — structured procedural/methodological text)
+    p3, pd3 = _stream_independent("ccdv/pubmed-summarization", None, "article",
+                                   "biomedical", filter_code_docs_positive, n_sec, tok,
+                                   chunk_long_docs=True)
+    pos += p3; p_dom += pd3
 
     # Negatives: Reddit (social/tech)
     print("  Loading Reddit for code_docs negatives ...")
@@ -851,6 +888,11 @@ def build_code_docs(n_total: int):
     n2, nd2 = _stream_independent("cc_news", None, "text", "news",
                                    filter_code_docs_negative, n_sec, tok, chunk_long_docs=True)
     neg += n2; n_dom += nd2
+
+    # Negatives: SCOTUS legal opinions (legal — formal text with tech vocabulary but not documentation)
+    n3, nd3 = _stream_independent("lex_glue", "scotus", "text", "legal",
+                                   filter_code_docs_negative, n_sec, tok, chunk_long_docs=True)
+    neg += n3; n_dom += nd3
 
     return pos, neg, p_dom, n_dom, None
 
@@ -898,6 +940,11 @@ def build_bureaucratic(n_total: int):
                                    chunk_long_docs=True)
     pos += p2; p_dom += pd2
 
+    # Positives: EurLex (legal_eu — EU legislative/regulatory text, highly bureaucratic)
+    p3, pd3 = _stream_independent("lex_glue", "eurlex", "text", "legal_eu",
+                                   filter_bureaucratic_positive, n_sec, tok, chunk_long_docs=True)
+    pos += p3; p_dom += pd3
+
     # Negatives: Yelp (review)
     print("  Loading Yelp for bureaucratic negatives ...")
     ds_yelp = load_dataset("Yelp/yelp_review_full", split="train", streaming=True)
@@ -912,6 +959,11 @@ def build_bureaucratic(n_total: int):
     n2, nd2 = _stream_independent("sentence-transformers/reddit", None, "body", "social",
                                    filter_bureaucratic_negative, n_sec, tok)
     neg += n2; n_dom += nd2
+
+    # Negatives: CC-News (news — general news, conversational register)
+    n3, nd3 = _stream_independent("cc_news", None, "text", "news",
+                                   filter_bureaucratic_negative, n_sec, tok, chunk_long_docs=True)
+    neg += n3; n_dom += nd3
 
     return pos, neg, p_dom, n_dom, None
 
@@ -1029,8 +1081,8 @@ def build_negation_density(n_total: int):
 
 def build_numerical_precision(n_total: int):
     """
-    3 domains: academic (ArXiv pos), news (CC-News pos/neg), social (Reddit neg).
-    Independent samples.
+    5 domains: academic (ArXiv pos), news (CC-News pos/neg), legal (SCOTUS pos),
+    social (Reddit neg), review (Yelp neg). Independent samples.
     """
     tok = get_tokenizer()
     n_sec = n_total // 3
@@ -1047,6 +1099,11 @@ def build_numerical_precision(n_total: int):
                                    filter_numerical_positive, n_sec, tok, chunk_long_docs=True)
     pos += p2; p_dom += pd2
 
+    # Positives: SCOTUS legal opinions (legal — opinions cite statutes, case numbers, dollar amounts)
+    p3, pd3 = _stream_independent("lex_glue", "scotus", "text", "legal",
+                                   filter_numerical_positive, n_sec, tok, chunk_long_docs=True)
+    pos += p3; p_dom += pd3
+
     # Negatives: CC-News (news narratives — vague quantifiers)
     n1, nd1 = _stream_independent("cc_news", None, "text", "news",
                                    filter_numerical_negative, n_total, tok, chunk_long_docs=True)
@@ -1056,6 +1113,11 @@ def build_numerical_precision(n_total: int):
     n2, nd2 = _stream_independent("sentence-transformers/reddit", None, "body", "social",
                                    filter_numerical_negative, n_sec, tok)
     neg += n2; n_dom += nd2
+
+    # Negatives: Yelp reviews (review — casual consumer text with vague quantities)
+    n3, nd3 = _stream_independent("Yelp/yelp_review_full", None, "text",
+                                   "review", filter_numerical_negative, n_sec, tok)
+    neg += n3; n_dom += nd3
 
     return pos, neg, p_dom, n_dom, None
 
@@ -1152,8 +1214,8 @@ def validate_corpus(concept: str, corpora_dir: Path) -> bool:
 
         # Domain diversity (warn only)
         domains = set(r.get("domain", "other") for r in pos_recs + neg_recs)
-        if len(domains) < 2:
-            print(f"  [WARN] {concept}/{split}: only {len(domains)} domain(s) covered (target ≥ 2)")
+        if len(domains) < 3:
+            print(f"  [WARN] {concept}/{split}: only {len(domains)} domain(s) covered (target ≥ 3)")
 
     if ok:
         print(f"  [OK] {concept}: all hard checks passed")
@@ -1226,6 +1288,7 @@ def main():
             corpora_dir=args.corpora_dir,
             dry_run=args.dry_run,
             matched_pair_ids=pair_ids,
+            seed_words=CONCEPTS[concept].get("seed_words", []),
         )
 
         if not args.dry_run:
