@@ -199,16 +199,31 @@ def rewrite_contrast(pos_text: str) -> Optional[str]:
 
 # ── Conditionality: rewrite if-then as direct statement ──────────────────────
 # ConjNLI natural pairs strongly preferred; this is a last-resort fallback.
+#
+# Strategy: surgically remove the conditional clause so only the consequent
+# remains as a direct assertion, instead of simply deleting the keyword.
+# Patterns listed from most-structural to most-aggressive:
+#   1. Leading clause  "If X, Y"       → "Y"   (whole antecedent + comma removed)
+#   2. Leading clause  "Unless X, Y"   → "Y"
+#   3. Leading phrase  "Given that X,…"→ consequent kept
+#   4. Trailing clause "Y, if X."      → "Y."  (comma + antecedent stripped)
+#   5. Trailing clause "Y, unless X."  → "Y."
+#   6. Trailing phrase "Y, provided that X." → "Y."
+# Each pattern captures the terminal punctuation in group 1 so it is preserved.
 
 _COND_REMOVALS: list[tuple[str, str]] = [
-    (r"\bif\s+",             ""),
-    (r"\bunless\s+",         ""),
-    (r"\bprovided that\s+",  ""),
-    (r"\bon condition that\s+", ""),
-    (r"\bassuming\s+",       ""),
-    (r"\bgiven that\s+",     ""),
-    (r"\bin case\s+",        ""),
-    (r"\botherwise[,]?\s*",  ""),
+    # Leading: "If <antecedent>, <consequent>"  → "<Consequent>"
+    (r"^[Ii]f\b[^,\n]{3,150},\s*",                                         ""),
+    # Leading: "Unless <antecedent>, <consequent>" → "<Consequent>"
+    (r"^[Uu]nless\b[^,\n]{3,150},\s*",                                     ""),
+    # Leading: "Provided that / Given that / Assuming / On condition that …, …"
+    (r"(?i)^(?:provided that|given that|on condition that|assuming|in case|in the event that)\b[^,\n]{3,150},\s*", ""),
+    # Trailing: "<main clause>, if <antecedent><punct>"  → "<main clause><punct>"
+    (r",?\s+if\b[^.!?\n]{3,150}([.!?])\s*$",                               r"\1"),
+    # Trailing: "<main clause>, unless <antecedent><punct>"
+    (r",?\s+unless\b[^.!?\n]{3,150}([.!?])\s*$",                           r"\1"),
+    # Trailing: "<main clause>, provided that / given that <antecedent><punct>"
+    (r"(?i),?\s+(?:provided that|given that|on condition that)\b[^.!?\n]{3,150}([.!?])\s*$", r"\1"),
 ]
 
 
@@ -216,14 +231,17 @@ def rewrite_conditionality(pos_text: str) -> Optional[str]:
     found = False
     result = pos_text
     for pattern, replacement in _COND_REMOVALS:
-        new = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
+        new = re.sub(pattern, replacement, result, flags=re.MULTILINE)
         if new != result:
             found = True
             result = new
     if not found:
         return None
     result = re.sub(r" {2,}", " ", result).strip()
-    if len(result.split()) < 10:
+    # Capitalise first character (leading-clause removal may leave a lower-case word)
+    if result:
+        result = result[0].upper() + result[1:]
+    if len(result.split()) < 5:
         return None
     return result
 

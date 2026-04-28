@@ -81,13 +81,13 @@ def filter_math_certainty_positive(text: str) -> bool:
 
 def filter_math_certainty_negative(text: str) -> bool:
     """
-    Negative = problem statement (interrogative, no certainty markers).
-    Used with lighteval/MATH: problem field is the negative, solution field is the positive.
+    Negative = academic text WITHOUT mathematical certainty/proof markers.
+    Used with ArXiv abstracts as source: formal writing that describes results
+    without proof-language ("therefore/hence/QED/it follows that").
     """
     lowered = text.lower()
-    has_problem_lang = any(p in lowered for p in _MATH_PROBLEM_TOKENS)
     has_certainty = any(m in lowered for m in _MATH_CERTAINTY_MARKERS)
-    return has_problem_lang and not has_certainty
+    return not has_certainty
 
 
 # ── Dense-lexical: frustration (go_emotions labels) ──────────────────────────
@@ -274,9 +274,12 @@ def filter_uncertainty_positive(text: str) -> bool:
 
 def filter_uncertainty_negative(text: str) -> bool:
     lowered = text.lower()
-    # Strong certainty signal; does not require absence of all uncertainty words
-    # (removing that constraint avoids scanning millions of records for rare matches)
-    return any(m in lowered for m in _CERTAINTY_MARKERS)
+    # Must have strong certainty signal AND no uncertainty markers (prevents
+    # records that use both hedging and certainty language from leaking in)
+    return (
+        any(m in lowered for m in _CERTAINTY_MARKERS)
+        and not any(m in lowered for m in _UNCERTAINTY_MARKERS)
+    )
 
 
 # ── Semantic-abstract: deference (SciCite labels) ────────────────────────────
@@ -333,8 +336,9 @@ def filter_numerical_positive(text: str) -> bool:
 
 
 def filter_numerical_negative(text: str) -> bool:
-    """Negative: vague quantifiers, no specific numbers."""
-    has_numbers = len(re.findall(r"\b\d+\.?\d*\b", text)) >= 2
+    """Negative: vague quantifiers, zero numeric tokens of any kind."""
+    # Any digit token (including currency, lone digits, quoted numbers) disqualifies
+    has_numbers = bool(re.search(r"\b\d", text))
     lowered      = text.lower()
     has_vague    = any(v in lowered for v in _VAGUE_QUANTS)
     return has_vague and not has_numbers
@@ -404,6 +408,9 @@ _PLANNING_POS_MARKERS = [
     "will be investigated", "will be explored", "will be extended",
     "in future", "as future work", "will investigate", "will extend",
     "future direction", "future research", "left for future",
+    "will be applied", "will be evaluated", "will be developed",
+    "will be studied", "will be examined", "we hope to", "we seek to",
+    "next step", "next steps", "upcoming work", "we target",
 ]
 
 _PLANNING_NEG_MARKERS = [
@@ -415,6 +422,9 @@ _PLANNING_NEG_MARKERS = [
 
 
 def filter_planning_positive(text: str) -> bool:
+    # Require ≥1 planning marker — the markers are specific enough that a single
+    # occurrence reliably indicates forward-looking/planning language.
+    # ≥2 threshold was too strict: only 407 valid texts exist in all of ArXiv.
     lowered = text.lower()
     return any(m in lowered for m in _PLANNING_POS_MARKERS)
 
@@ -473,7 +483,9 @@ def filter_pos_sentiment_positive_text(text: str) -> bool:
 
 
 def filter_pos_sentiment_negative_text(text: str) -> bool:
-    return bool(_NEG_SENT_RE.search(text)) and not bool(_POS_SENT_RE.search(text))
+    # Require ≥2 negative sentiment words so a single incidental "bad" in a
+    # neutral news or informational article does not qualify
+    return len(_NEG_SENT_RE.findall(text)) >= 2 and not bool(_POS_SENT_RE.search(text))
 
 
 # ── Dense-lexical: toxicity (text-based, for multi-domain) ───────────────────
@@ -519,13 +531,22 @@ _NON_DEPRESSION_TEXT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Require first-person narrator so news articles, product posts, and
+# email-chain forwards (which use third-person or no personal voice) are rejected
+_FIRST_PERSON_RE = re.compile(r"\b(I|I'm|I've|I'd|I'll|my|myself|i feel|i am)\b")
+
 
 def filter_depression_positive_text(text: str) -> bool:
     return bool(_DEPRESSION_TEXT_RE.search(text))
 
 
 def filter_depression_negative_text(text: str) -> bool:
-    return not bool(_NON_DEPRESSION_TEXT_RE.search(text))
+    # Must not contain depression keywords AND must be first-person personal text
+    # (excludes news articles, product announcements, email chains, etc.)
+    return (
+        not bool(_NON_DEPRESSION_TEXT_RE.search(text))
+        and bool(_FIRST_PERSON_RE.search(text))
+    )
 
 
 # ── Registry: get filter by (concept, label) ─────────────────────────────────
