@@ -213,10 +213,11 @@ def audit_concept(concept: str, fix: bool = False) -> dict:
                     fixes_applied.append(f"removed {len(contaminated)} seed-contaminated records from {stem}")
 
     # ── 5. Token length out of range ─────────────────────────────────────────
+    tok_min, tok_max = meta.get("token_range", [300, 500])
     for stem, recs in files.items():
-        bad = [r for r in recs if not (300 <= r.get("token_count", 0) <= 500)]
+        bad = [r for r in recs if not (tok_min <= r.get("token_count", 0) <= tok_max)]
         if bad:
-            issues.append(f"token length out of [300,500] in {stem}: {len(bad)} records")
+            issues.append(f"token length out of [{tok_min},{tok_max}] in {stem}: {len(bad)} records")
 
     # ── 6. Matched-pair token diff > 25 ─────────────────────────────────────
     if is_matched:
@@ -261,7 +262,8 @@ def audit_concept(concept: str, fix: bool = False) -> dict:
     # ── 9. Domain diversity ───────────────────────────────────────────────────
     all_recs = [r for recs in files.values() for r in recs]
     domains  = {r.get("domain", "unknown") for r in all_recs}
-    if len(domains) < 3:
+    min_domains = meta.get("min_domains", 3)
+    if len(domains) < min_domains:
         issues.append(f"domain diversity: only {len(domains)} domain(s) — {sorted(domains)}")
 
     # ── 11. Label field sanity ─────────────────────────────────────────────────

@@ -79,8 +79,12 @@ CONCEPTS = {
         "seed_words": [],
         "positive_def": "Passage contains harmful, harassing, or offensive language",
         "negative_def": "Neutral passage on the same topic without harmful language",
-        "hf_source": "jigsaw_unintended_bias",
+        "hf_source": "google/civil_comments",
         "adversarial": True,
+        # Civil comments are naturally short; relax the 300-token floor for this concept.
+        "token_range": [30, 500],
+        # civil_comments is a single-source dataset; 1 domain is inherent.
+        "min_domains": 1,
         "ethical_note": (
             "Used to test directional separability only. Outputs scored by frozen "
             "classifier and discarded — not released. Steering vector withheld from "
@@ -237,6 +241,8 @@ CONCEPTS = {
         "positive_def": "Passage exhibits future-directed planning and forethought",
         "negative_def": "Passage describes past actions or current state without future planning",
         "hf_source": "tasksource/bigbench",
+        # Reddit removed (generic social posts failed quality checks); 2 domains is intentional.
+        "min_domains": 2,
     },
 
     # ── SYNTACTIC (deterministic) ─────────────────────────────────────────

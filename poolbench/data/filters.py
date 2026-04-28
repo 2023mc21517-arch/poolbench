@@ -541,7 +541,9 @@ _FIRST_PERSON_RE = re.compile(r"\b(I|I'm|I've|I'd|I'll|my|myself|i feel|i am)\b"
 
 
 def filter_depression_positive_text(text: str) -> bool:
-    return bool(_DEPRESSION_TEXT_RE.search(text))
+    # Require first-person narrator so news articles / third-person coverage
+    # (which often mention "mental health" or "anxiety" in passing) are excluded.
+    return bool(_DEPRESSION_TEXT_RE.search(text)) and bool(_FIRST_PERSON_RE.search(text))
 
 
 def filter_depression_negative_text(text: str) -> bool:

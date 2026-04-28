@@ -32,7 +32,7 @@ from typing import Optional
 
 from poolbench.concepts import CONCEPTS, CONCEPT_NAMES
 from poolbench.utils import (
-    clean_text, is_valid_length, is_length_matched,
+    clean_text, is_valid_length, is_length_matched, token_count,
     make_record, save_jsonl, has_seed_words, infer_domain,
 )
 from poolbench.filters import (
@@ -617,6 +617,9 @@ def build_pos_sentiment(n_total: int):
         label = int(ex.get("label", -1))  # 1=positive, 0=negative
         if not is_valid_length(text, tok):
             continue
+        # Reject non-English reviews: require ≥85% ASCII characters
+        if len(text) > 0 and sum(1 for c in text if ord(c) < 128) / len(text) < 0.85:
+            continue
         if label == 1 and len(pos) < n_total:
             pos.append(text); p_dom.append("product")
         elif label == 0 and len(neg) < n_total:
@@ -629,79 +632,35 @@ def build_pos_sentiment(n_total: int):
 
 def build_toxicity(n_total: int):
     """
-    3 domains: restaurant (Yelp), movies (IMDB), news (CC-News).
-    Positives: hostile 1-star reviews (Yelp primary, IMDB bonus) with ≥1 hostile word.
-    Negatives: civil text from all 3 domains (333 each).
-      CC-News replaces Amazon as 3rd domain — news chunks are civil and abundant
-      at 300-500 tokens, while Amazon product reviews are mostly <300 tokens.
+    Source: google/civil_comments (Jigsaw Unintended Bias dataset, CC0).
+    Positives: comments with toxicity score ≥ 0.5  (hate speech, threats, slurs,
+      personal attacks — genuine toxic speech, not mere negative sentiment).
+    Negatives: comments with toxicity score < 0.1  (civil discourse).
+    1.8M rows → easily yields 700+ in each class within the first ~100k rows.
+    Uses the existing filter_toxicity_positive / filter_toxicity_negative functions
+    in filters.py which were already written for this dataset's score column.
     """
-    import re
     from datasets import load_dataset
-    from poolbench.filters import filter_toxicity_negative_text
+    from poolbench.filters import filter_toxicity_positive, filter_toxicity_negative
     tok = get_tokenizer()
 
     pos, neg, p_dom, n_dom = [], [], [], []
 
-    _hostile_re = re.compile(
-        r'\b(horrible|disgusting|pathetic|awful|atrocious|worthless|'
-        r'incompetent|rude|nasty|scam|fraud|liar|cheated|ripped.?off|'
-        r'disgraceful|unacceptable|offensive|abysmal|deplorable|'
-        r'unprofessional|absolutely terrible|stay away|worst|disgusted|'
-        r'threatening|abusive|harass|racist|slur|hate)\b',
-        re.IGNORECASE,
-    )
-
-    n_neg_each = n_total // 3   # ~333 neg per domain
-
-    # Positives: Yelp fills all n_total; IMDB adds bonus records for domain variety
-    print("  Loading Yelp/yelp_review_full for toxicity ...")
-    ds_yelp = load_dataset("Yelp/yelp_review_full", split="train", streaming=True)
-    for ex in ds_yelp:
-        if len(pos) >= n_total and len(neg) >= n_neg_each:
-            break
-        label = int(ex.get("label", -1))
-        text = clean_text(ex.get("text", ""))
-        if not is_valid_length(text, tok):
-            continue
-        if label == 0 and len(pos) < n_total:
-            if len(_hostile_re.findall(text)) >= 1:
-                pos.append(text); p_dom.append("restaurant")
-        elif label in (3, 4) and len(neg) < n_neg_each:
-            if filter_toxicity_negative_text(text):
-                neg.append(text); n_dom.append("restaurant")
-
-    print("  Loading IMDB for toxicity (movies domain) ...")
-    ds_imdb = load_dataset("imdb", split="train", streaming=True)
-    for ex in ds_imdb:
-        if len(pos) >= n_total and len(neg) >= n_neg_each * 2:
-            break
-        text = clean_text(ex.get("text", ""))
-        label = int(ex.get("label", -1))
-        if not is_valid_length(text, tok):
-            continue
-        if label == 0 and len(pos) < n_total:
-            if len(_hostile_re.findall(text)) >= 1:
-                pos.append(text); p_dom.append("movies")
-        elif label == 1 and len(neg) < n_neg_each * 2:
-            if filter_toxicity_negative_text(text):
-                neg.append(text); n_dom.append("movies")
-
-    print("  Loading cc_news for toxicity negatives (news domain) ...")
-    ds_news = load_dataset("cc_news", split="train", streaming=True)
-    for ex in ds_news:
+    print("  Loading google/civil_comments for toxicity ...")
+    ds = load_dataset("google/civil_comments", split="train", streaming=True)
+    for ex in ds:
         if len(pos) >= n_total and len(neg) >= n_total:
             break
-        full_text = clean_text(ex.get("text", "") or "")
-        if not full_text:
+        text = clean_text(ex.get("text", "") or "")
+        # Civil comments are short; use a relaxed minimum (30 tokens) instead of
+        # the global 300-token floor which would filter out all hate speech.
+        if token_count(text, tok) < 30:
             continue
-        for chunk in _chunk_tokens(full_text, tok):
-            if len(neg) >= n_total:
-                break
-            if not is_valid_length(chunk, tok):
-                continue
-            if filter_toxicity_negative_text(chunk):
-                neg.append(chunk); n_dom.append("news")
-                break  # one chunk per article
+        score = float(ex.get("toxicity", 0.0))
+        if filter_toxicity_positive(score) and len(pos) < n_total:
+            pos.append(text); p_dom.append("comments")
+        elif filter_toxicity_negative(score) and len(neg) < n_total:
+            neg.append(text); n_dom.append("comments")
 
     return pos, neg, p_dom, n_dom, None
 
@@ -1081,11 +1040,12 @@ def build_planning(n_total: int):
 
     pos, neg, p_dom, n_dom = [], [], [], []
 
-    # Positives: 3 domains
+    # Positives: academic (ArXiv) + news (CC-News) only.
+    # Reddit removed: _PLANNING_POS_MARKERS like "we will" and "next steps" are
+    # too generic and match crisis posts, relationship posts, etc.
     for ds_name, config, field, domain, n_target, chunk in [
         ("gfissore/arxiv-abstracts-2021", None, "abstract", "academic", n_total, False),
         ("cc_news",                        None, "text",     "news",     n_sec,   True),
-        ("sentence-transformers/reddit",   None, "body",     "social",   n_sec,   False),
     ]:
         p, pd_ = _stream_independent(ds_name, config, field, domain,
                                       filter_planning_positive, n_target, tok, chunk)
@@ -1246,8 +1206,9 @@ def validate_corpus(concept: str, corpora_dir: Path) -> bool:
             continue
 
         # Length check
-        bad_pos = [r for r in pos_recs if not (300 <= r["token_count"] <= 500)]
-        bad_neg = [r for r in neg_recs if not (300 <= r["token_count"] <= 500)]
+        tok_min, tok_max = meta.get("token_range", [300, 500])
+        bad_pos = [r for r in pos_recs if not (tok_min <= r["token_count"] <= tok_max)]
+        bad_neg = [r for r in neg_recs if not (tok_min <= r["token_count"] <= tok_max)]
         if bad_pos or bad_neg:
             print(f"  [FAIL] {concept}/{split}: {len(bad_pos)} pos / {len(bad_neg)} neg out of length range")
             ok = False
