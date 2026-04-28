@@ -256,9 +256,13 @@ def filter_bureaucratic_negative(text: str) -> bool:
 # ── Semantic-abstract: uncertainty ───────────────────────────────────────────
 
 _UNCERTAINTY_MARKERS = [
-    "unclear", "uncertain", "may", "it is possible",
+    "unclear", "uncertain",
     "debated", "no consensus", "unknown", "disputed",
     "controversial", "not yet known", "remains to be",
+    "it is not known", "it remains unclear", "little is known",
+    "not well understood", "not fully understood", "open question",
+    "it is unclear", "is still unknown", "poorly understood",
+    "has not been established", "has not been determined",
 ]
 
 _CERTAINTY_MARKERS = [
