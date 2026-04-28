@@ -539,11 +539,25 @@ _NON_DEPRESSION_TEXT_RE = re.compile(
 # email-chain forwards (which use third-person or no personal voice) are rejected
 _FIRST_PERSON_RE = re.compile(r"\b(I|I'm|I've|I'd|I'll|my|myself|i feel|i am)\b")
 
+# Sentence splitter — split on . ! ? followed by whitespace or end-of-string
+_SENT_SPLIT_RE = re.compile(r'(?<=[.!?])\s+')
+
+
+def _depression_keyword_in_same_sentence(text: str) -> bool:
+    """Return True only if at least one sentence contains BOTH a first-person
+    pronoun AND a depression keyword.  This rejects news articles where 'I'
+    appears in an unrelated quote while depression language appears elsewhere."""
+    for sent in _SENT_SPLIT_RE.split(text):
+        if _DEPRESSION_TEXT_RE.search(sent) and _FIRST_PERSON_RE.search(sent):
+            return True
+    return False
+
 
 def filter_depression_positive_text(text: str) -> bool:
-    # Require first-person narrator so news articles / third-person coverage
-    # (which often mention "mental health" or "anxiety" in passing) are excluded.
-    return bool(_DEPRESSION_TEXT_RE.search(text)) and bool(_FIRST_PERSON_RE.search(text))
+    # Require that the depression keyword and first-person pronoun co-occur in
+    # the same sentence — prevents news articles where "I" is a stray quote and
+    # the depression term is in a separate reportage sentence.
+    return _depression_keyword_in_same_sentence(text)
 
 
 def filter_depression_negative_text(text: str) -> bool:
