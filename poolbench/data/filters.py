@@ -191,10 +191,27 @@ def filter_conditionality_negative_label(label: str) -> bool:
 # ── Register: academic_tone ───────────────────────────────────────────────────
 # Positives come from scientific_papers (arxiv) — all qualify.
 # Negatives come from reddit — all qualify.
-# We still add a light check to exclude very short or code-heavy passages.
+# Vocabulary check ensures positives contain formal academic register markers.
+
+_ACADEMIC_VOCAB_RE = re.compile(
+    r'\b(?:analysis|analysi|hypothesis|methodology|methods|findings|results|'
+    r'demonstrate|demonstrates|demonstrated|evidence|significant|significance|'
+    r'correlation|parameter|parameters|framework|theoretical|empirical|'
+    r'quantitative|qualitative|variable|variables|statistical|coefficient|'
+    r'variance|investigation|approach|assessment|evaluation|experimental|'
+    r'clinical|systematic|review|propose|proposed|novel|algorithm|'
+    r'conclude|conclusion|conclusions|furthermore|moreover|however|'
+    r'thus|therefore|hence|indicate|indicates|suggest|suggests|'
+    r'study|studies|literature|model|models|dataset|corpus|'
+    r'accuracy|performance|benchmark|baseline|evaluation|'
+    r'equation|theorem|proof|observation|observations)\b',
+    re.IGNORECASE,
+)
+
 
 def filter_academic_positive(text: str) -> bool:
-    return len(text.split()) >= 60   # At least 60 words to have substantive content
+    # Require substantive length AND at least 2 academic vocabulary terms
+    return len(text.split()) >= 60 and len(_ACADEMIC_VOCAB_RE.findall(text)) >= 2
 
 
 def filter_academic_negative(text: str) -> bool:
@@ -243,8 +260,23 @@ def filter_code_docs_negative(text: str) -> bool:
 
 def filter_bureaucratic_positive(text: str) -> bool:
     lowered = text.lower()
-    markers = ["section", "subsection", "chapter", "article", "pursuant",
-               "shall", "thereof", "hereby", "the secretary", "the director"]
+    markers = [
+        # Structural references
+        "section", "subsection", "chapter", "article", "paragraph",
+        "clause", "provision", "title", "subpart", "part",
+        # Mandatory/legal language
+        "shall", "pursuant", "thereof", "hereby", "therein", "thereto",
+        "hereunder", "herein", "heretofore", "notwithstanding",
+        "in accordance with", "as set forth", "as provided", "as required",
+        # Official actors & instruments
+        "the secretary", "the director", "the administrator", "the commissioner",
+        "the department", "the agency", "the authority", "the board",
+        "the committee", "the office of",
+        # Regulatory/procedural phrases
+        "regulations", "regulatory", "compliance", "authorized",
+        "designated", "promulgate", "administrat", "enforcement",
+        "effective date", "upon receipt", "upon request", "federal register",
+    ]
     return sum(1 for m in markers if m in lowered) >= 2
 
 
@@ -263,6 +295,15 @@ _UNCERTAINTY_MARKERS = [
     "not well understood", "not fully understood", "open question",
     "it is unclear", "is still unknown", "poorly understood",
     "has not been established", "has not been determined",
+    # Extended markers for broader coverage
+    "remains unclear", "remains unknown", "is not fully understood",
+    "is not yet known", "is not well understood", "is yet to be",
+    "has yet to be", "has not yet been", "debate continues",
+    "is still debated", "is still unclear", "remains an open",
+    "no definitive", "inconclusive", "not conclusively",
+    "subject to debate", "is poorly understood", "largely unknown",
+    "not fully clear", "is still unknown", "insufficient evidence",
+    "limited understanding", "not fully elucidated",
 ]
 
 _CERTAINTY_MARKERS = [
@@ -444,10 +485,16 @@ def filter_planning_negative(text: str) -> bool:
 # ── Dense-lexical: frustration (text-based, for multi-domain) ────────────────
 
 _FRUSTRATION_TEXT_RE = re.compile(
-    r'\b(frustrat|furious|infuriat|outrag|appalling|unacceptable|'
-    r'incompetent|pathetic|atrocious|dreadful|never again|'
-    r'worst experience|terrible service|disgusting|deplorable|'
-    r'unprofessional|abysmal)\b',
+    # Stems — match with only a leading word boundary so suffixes like -ed/-ing/-ion work
+    r'\b(?:frustrat|infuriat|outrag|enrag|aggravat|exasperat)'
+    r'|'
+    # Exact single words — require full word boundary on both sides
+    r'\b(?:furious|appalling|unacceptable|incompetent|pathetic|atrocious|dreadful|'
+    r'disgusting|deplorable|unprofessional|abysmal|worst|terrible|horrible|awful|fed\s+up)\b'
+    r'|'
+    # Phrases — no word boundary around whole phrase needed
+    r'never again|worst experience|terrible service|ripped off|rip.?off'
+    r'|sick and tired|waste of (?:time|money)',
     re.IGNORECASE,
 )
 
@@ -495,11 +542,43 @@ def filter_pos_sentiment_negative_text(text: str) -> bool:
 # ── Dense-lexical: toxicity (text-based, for multi-domain) ───────────────────
 
 _HOSTILE_TEXT_RE = re.compile(
-    r'\b(horrible|disgusting|pathetic|awful|atrocious|worthless|'
-    r'incompetent|rude|nasty|scam|fraud|liar|cheated|ripped off|'
-    r'disgraceful|unacceptable|offensive|abysmal|deplorable|'
-    r'unprofessional|absolutely terrible|stay away)\b',
+    r'\b(?:'
+    # Strong profanity / vulgarity
+    r'asshole|assholes|bullshit|bullsh.t|dumbass|jackass|bastard|bitch|bitches|'
+    r'motherfucker|f.ck(?:ing|er|ers|ed)?|shit(?:ty|head|hole)?|crap(?:py)?|'
+    r'piss(?:ed)?|cunt|screw\s+you|'
+    # Classic hostile words
+    r'horrible|disgusting|pathetic|atrocious|worthless|'
+    r'incompetent|rude|nasty|scam(?:mer)?|fraud|liar|cheated|ripped off|'
+    r'disgraceful|unacceptable|abysmal|deplorable|'
+    r'unprofessional|absolutely terrible|stay away|'
+    # Personal attacks / insults
+    r'moron|idiot|stupid(?:ly|est)?|dumbest|imbecile|halfwit|dimwit|'
+    r'senile|scumbag|loser|creep|pervert|coward|'
+    r'trash|garbage|filth(?:y)?|ignorant|hack(?:[^e]|$)|'
+    r'ridiculous(?:ly)?|ugly|stinky|brainwash|sheeple|'
+    # Threats / harassment / hate (specific forms only)
+    r'hate\s+speech|kill\s+yourself|go\s+die|drop\s+dead|'
+    r'white\s+trash|'
+    # Bigotry directed at people
+    r'racist|sexist|bigot(?:ry)?|homophob(?:ic|e|ia)?|'
+    # Drug / harm encouragement directed at a person
+    r'smoke\s+crack|do\s+drugs|overdose|'
+    # Intelligence / competence attacks
+    r'un-american|unamerican|lack(?:s)?\s+(?:the\s+)?intelligence|'
+    r'void\s+of\s+(?:intelligence|logic)'
+    r')\b'
+    r'|'
+    # Phrase patterns
+    r'rip.?off|sick and tired|piece of (?:shit|trash|garbage|crap)|'
+    r'go to hell|shut the f|you\s+people\s+are',
     re.IGNORECASE,
+)
+
+# Separate case-sensitive pattern for all-caps aggression (4+ uppercase words)
+# Deliberately NOT compiled with IGNORECASE so [A-Z] only matches true uppercase
+_HOSTILE_ALLCAPS_RE = re.compile(
+    r'(?:[A-Z#@]{3,}[\s#!@:]+){3}[A-Z]{3,}'
 )
 
 _POSITIVE_TEXT_RE = re.compile(
@@ -511,7 +590,7 @@ _POSITIVE_TEXT_RE = re.compile(
 
 
 def filter_toxicity_positive_text(text: str) -> bool:
-    return bool(_HOSTILE_TEXT_RE.search(text))
+    return bool(_HOSTILE_TEXT_RE.search(text)) or bool(_HOSTILE_ALLCAPS_RE.search(text))
 
 
 def filter_toxicity_negative_text(text: str) -> bool:

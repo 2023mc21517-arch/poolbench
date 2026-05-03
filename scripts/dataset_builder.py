@@ -450,35 +450,29 @@ def build_legal_formality(n_total: int):
 def build_math_certainty(n_total: int):
     """
     Independent samples (NOT matched pairs).
-    Positives: hendrycks_math solutions — contain "therefore/thus/hence/QED" in proof context.
+    Positives: NuminaMath-CoT solutions — competition math proofs with "therefore/thus/hence"
+      in rich chain-of-thought style solutions. 859k+ examples, far more than hendrycks_math.
     Negatives: ArXiv abstracts — academic text without mathematical certainty markers.
-    Rationale: problem texts are 15-100 tokens (median 41), far below MIN_TOKENS=300.
-    Pairing solutions with problems produces ~0 valid pairs. Independent sampling is correct.
     """
-    from datasets import load_dataset, get_dataset_config_names
+    from datasets import load_dataset
     tok = get_tokenizer()
 
     pos, neg, p_dom, n_dom = [], [], [], []
 
-    # Positives: hendrycks_math solutions (proof language with certainty markers)
-    print("  Loading EleutherAI/hendrycks_math configs for math_certainty positives ...")
-    for cfg in get_dataset_config_names("EleutherAI/hendrycks_math"):
+    # Positives: NuminaMath-CoT solutions (competition math with explicit proof language)
+    # The 'solution' field contains step-by-step reasoning with "therefore", "hence", "thus".
+    print("  Loading AI-MO/NuminaMath-CoT for math_certainty positives ...")
+    ds_numina = load_dataset("AI-MO/NuminaMath-CoT", split="train", streaming=True)
+    for ex in ds_numina:
         if len(pos) >= n_total:
             break
-        for split_name in ("train", "test"):
-            if len(pos) >= n_total:
-                break
-            ds = load_dataset("EleutherAI/hendrycks_math", cfg, split=split_name, streaming=True)
-            for ex in ds:
-                if len(pos) >= n_total:
-                    break
-                solution = clean_text(ex.get("solution", ""))
-                if not is_valid_length(solution, tok):
-                    continue
-                if not filter_math_certainty_positive(solution):
-                    continue
-                pos.append(solution)
-                p_dom.append("math")
+        solution = clean_text(ex.get("solution", ""))
+        if not is_valid_length(solution, tok):
+            continue
+        if not filter_math_certainty_positive(solution):
+            continue
+        pos.append(solution)
+        p_dom.append("math")
 
     # Negatives: ArXiv abstracts — formal academic writing WITHOUT certainty markers
     # These describe results observationally ("we show", "results suggest") rather
@@ -632,35 +626,141 @@ def build_pos_sentiment(n_total: int):
 
 def build_toxicity(n_total: int):
     """
-    Source: google/civil_comments (Jigsaw Unintended Bias dataset, CC0).
-    Positives: comments with toxicity score ≥ 0.5  (hate speech, threats, slurs,
-      personal attacks — genuine toxic speech, not mere negative sentiment).
-    Negatives: comments with toxicity score < 0.1  (civil discourse).
-    1.8M rows → easily yields 700+ in each class within the first ~100k rows.
-    Uses the existing filter_toxicity_positive / filter_toxicity_negative functions
-    in filters.py which were already written for this dataset's score column.
+        3 domains: online (surge-ai), comments (civil_comments), twitter (Davidson hate speech).
+        Positives: explicitly labeled toxic/hate speech/offensive or strict high-confidence
+            Civil Comments samples with hostile-text confirmation.
+        Negatives: explicitly labeled non-toxic/neither or strict low-toxicity Civil Comments
+            samples with no hostile-text marker.
+    Sources:
+      1. surge-ai toxicity CSV — broad English toxic content, binary labeled.
+      2. tdavidson/hate_speech_offensive — Twitter data; class 0=hate_speech, 1=offensive (POS);
+         class 2=neither (NEG). Provides the third domain (twitter) and explicit slurs/hate content.
+      3. google/civil_comments — score-based fallback to fill any shortfall.
     """
+    import pandas as pd
     from datasets import load_dataset
-    from poolbench.filters import filter_toxicity_positive, filter_toxicity_negative
+    from poolbench.filters import filter_toxicity_positive_text
     tok = get_tokenizer()
+    n_sec = n_total // 3   # ~333 per source
 
     pos, neg, p_dom, n_dom = [], [], [], []
 
-    print("  Loading google/civil_comments for toxicity ...")
+    def _len_ok(text: str, min_tokens: int) -> bool:
+        n_tok = token_count(text, tok)
+        return min_tokens <= n_tok <= 500
+
+    def _domain_count(domains: list[str], name: str) -> int:
+        return sum(1 for d in domains if d == name)
+
+    # Source 1: surge-ai toxicity CSV (binary labeled — "online" domain)
+    _SURGE_URL = (
+        "https://raw.githubusercontent.com/surge-ai/toxicity/main/toxicity_en.csv"
+    )
+    print("  Loading surge-ai toxicity CSV ...")
+    try:
+        df_surge = pd.read_csv(_SURGE_URL)
+        df_surge.columns = [c.strip().lower() for c in df_surge.columns]
+        for _, row in df_surge.iterrows():
+            text = clean_text(str(row.get("text", "") or ""))
+            if not _len_ok(text, 30):
+                continue
+            label = str(row.get("is_toxic", "")).strip().lower()
+            if label in {"toxic", "1", "true"} and len(pos) < n_sec:
+                pos.append(text); p_dom.append("online")
+            elif label in {"not toxic", "0", "false"} and len(neg) < n_sec:
+                neg.append(text); n_dom.append("online")
+    except Exception as e:
+        print(f"  [WARN] surge-ai CSV load failed ({e})")
+
+    # Source 2: Davidson hate speech (Twitter — adds "twitter" domain, solves 3-domain requirement)
+    # class 0 = hate speech (slurs, targeted hate), class 1 = offensive language,
+    # class 2 = neither (clean tweets). Using class 0+1 as POS, class 2 as NEG.
+    print("  Loading tdavidson/hate_speech_offensive for toxicity (twitter domain) ...")
+    ds_tw = load_dataset("tdavidson/hate_speech_offensive", split="train", streaming=True)
+    for ex in ds_tw:
+        if _domain_count(p_dom, "twitter") >= n_sec and _domain_count(n_dom, "twitter") >= n_sec:
+            break
+        text = clean_text(ex.get("tweet", "") or "")
+        # Strip RT prefix noise and HTML entities
+        text = text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+        if not _len_ok(text, 15):   # tweets are short; use 15-token floor
+            continue
+        cls = int(ex.get("class", 2))
+        if cls in (0, 1) and _domain_count(p_dom, "twitter") < n_sec:
+            pos.append(text); p_dom.append("twitter")
+        elif cls == 2 and _domain_count(n_dom, "twitter") < n_sec:
+            neg.append(text); n_dom.append("twitter")
+
+    # Source 3: civil_comments with stricter intent guardrails (comments domain)
+    # High score alone is insufficient: neutral/critical discussion can score high.
+    # Require hostile-text confirmation for positives and explicit hostility absence for negatives.
+    print("  Loading google/civil_comments for strict toxicity comments domain ...")
     ds = load_dataset("google/civil_comments", split="train", streaming=True)
     for ex in ds:
-        if len(pos) >= n_total and len(neg) >= n_total:
+        if _domain_count(p_dom, "comments") >= n_sec and _domain_count(n_dom, "comments") >= n_sec:
             break
         text = clean_text(ex.get("text", "") or "")
-        # Civil comments are short; use a relaxed minimum (30 tokens) instead of
-        # the global 300-token floor which would filter out all hate speech.
-        if token_count(text, tok) < 30:
+        if not _len_ok(text, 30):
             continue
         score = float(ex.get("toxicity", 0.0))
-        if filter_toxicity_positive(score) and len(pos) < n_total:
+        is_hostile_text = filter_toxicity_positive_text(text)
+        if score >= 0.7 and is_hostile_text and _domain_count(p_dom, "comments") < n_sec:
             pos.append(text); p_dom.append("comments")
-        elif filter_toxicity_negative(score) and len(neg) < n_total:
+        elif score <= 0.1 and (not is_hostile_text) and _domain_count(n_dom, "comments") < n_sec:
             neg.append(text); n_dom.append("comments")
+
+    # Shortfall top-up: prioritize explicit-label sources (surge-ai, davidson),
+    # then strict civil_comments fallback.
+    if len(pos) < n_total or len(neg) < n_total:
+        print("  Top-up from explicit-label sources for toxicity shortfall ...")
+
+        # surge-ai top-up
+        try:
+            for _, row in df_surge.iterrows():
+                if len(pos) >= n_total and len(neg) >= n_total:
+                    break
+                text = clean_text(str(row.get("text", "") or ""))
+                if not _len_ok(text, 30):
+                    continue
+                label = str(row.get("is_toxic", "")).strip().lower()
+                if label in {"toxic", "1", "true"} and len(pos) < n_total:
+                    pos.append(text); p_dom.append("online")
+                elif label in {"not toxic", "0", "false"} and len(neg) < n_total:
+                    neg.append(text); n_dom.append("online")
+        except Exception:
+            pass
+
+        # davidson top-up
+        if len(pos) < n_total or len(neg) < n_total:
+            ds_tw_topup = load_dataset("tdavidson/hate_speech_offensive", split="train", streaming=True)
+            for ex in ds_tw_topup:
+                if len(pos) >= n_total and len(neg) >= n_total:
+                    break
+                text = clean_text(ex.get("tweet", "") or "")
+                text = text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+                if not _len_ok(text, 15):
+                    continue
+                cls = int(ex.get("class", 2))
+                if cls in (0, 1) and len(pos) < n_total:
+                    pos.append(text); p_dom.append("twitter")
+                elif cls == 2 and len(neg) < n_total:
+                    neg.append(text); n_dom.append("twitter")
+
+        # strict civil_comments final fallback
+        if len(pos) < n_total or len(neg) < n_total:
+            ds_civil_topup = load_dataset("google/civil_comments", split="train", streaming=True)
+            for ex in ds_civil_topup:
+                if len(pos) >= n_total and len(neg) >= n_total:
+                    break
+                text = clean_text(ex.get("text", "") or "")
+                if not _len_ok(text, 30):
+                    continue
+                score = float(ex.get("toxicity", 0.0))
+                is_hostile_text = filter_toxicity_positive_text(text)
+                if score >= 0.7 and is_hostile_text and len(pos) < n_total:
+                    pos.append(text); p_dom.append("comments")
+                elif score <= 0.1 and (not is_hostile_text) and len(neg) < n_total:
+                    neg.append(text); n_dom.append("comments")
 
     return pos, neg, p_dom, n_dom, None
 
@@ -840,10 +940,28 @@ def build_academic_tone(n_total: int):
                                    filter_academic_positive, n_sec, tok, chunk_long_docs=True)
     pos += p2; p_dom += pd2
 
-    # Positives: PubMed abstracts (biomedical — formal academic biomedical text)
-    p3, pd3 = _stream_independent("ccdv/pubmed-summarization", None, "abstract",
-                                   "biomedical", filter_academic_positive, n_sec, tok)
-    pos += p3; p_dom += pd3
+    # Positives: PubMedQA long answers (biomedical — formal medical academic writing)
+    # Uses pqa_artificial (211k examples) for volume; long_answer field contains
+    # the formal biomedical conclusion text, typically 2-4 sentences of dense
+    # academic prose with methodology and result language.
+    print("  Loading qiaojin/PubMedQA for academic_tone positives (biomedical domain) ...")
+    ds_pubmedqa = load_dataset("qiaojin/PubMedQA", "pqa_artificial", split="train", streaming=True)
+    _p3, _pd3 = [], []
+    for ex in ds_pubmedqa:
+        if len(_p3) >= n_sec:
+            break
+        text = clean_text(ex.get("long_answer", "") or "")
+        if not text:
+            # Fall back to first context passage
+            ctx = ex.get("context", {})
+            ctxs = ctx.get("contexts", []) if isinstance(ctx, dict) else []
+            text = clean_text(ctxs[0]) if ctxs else ""
+        if not text or not is_valid_length(text, tok):
+            continue
+        if filter_academic_positive(text):
+            _p3.append(text)
+            _pd3.append("biomedical")
+    pos += _p3; p_dom += _pd3
 
     # Negatives: Reddit (social)
     print("  Loading Reddit for academic_tone negatives ...")
@@ -1098,13 +1216,32 @@ def build_negation_density(n_total: int):
 
 def build_numerical_precision(n_total: int):
     """
-    5 domains: academic (ArXiv pos), news (CC-News pos/neg), legal (SCOTUS pos),
-    social (Reddit neg), review (Yelp neg). Independent samples.
+    5 domains: academic (ArXiv pos), math (MetaMathQA pos), news (CC-News pos/neg),
+    legal (SCOTUS pos), social (Reddit neg), review (Yelp neg). Independent samples.
+    MetaMathQA 'response' field = step-by-step math solutions with explicit plain-text
+    numbers (no LaTeX formatting), providing cleaner numeric signal than ArXiv.
     """
+    from datasets import load_dataset
     tok = get_tokenizer()
     n_sec = n_total // 3
 
     pos, neg, p_dom, n_dom = [], [], [], []
+
+    # Positives: MetaMathQA responses (math — step-by-step word-problem solutions
+    # with explicit plain-text numbers like "120 apples", "45%", "3.14").
+    # These avoid the LaTeX-formatting issue that affects ArXiv positives.
+    print("  Loading meta-math/MetaMathQA for numerical_precision positives (math domain) ...")
+    ds_meta = load_dataset("meta-math/MetaMathQA", split="train", streaming=True)
+    _p0, _pd0 = [], []
+    for ex in ds_meta:
+        if len(_p0) >= n_total:
+            break
+        text = clean_text(ex.get("response", "") or "")
+        if not is_valid_length(text, tok):
+            continue
+        if filter_numerical_positive(text):
+            _p0.append(text); _pd0.append("math")
+    pos += _p0; p_dom += _pd0
 
     # Positives: ArXiv (academic — most reliable for ≥4 numeric tokens)
     p1, pd1 = _stream_independent("gfissore/arxiv-abstracts-2021", None, "abstract",
