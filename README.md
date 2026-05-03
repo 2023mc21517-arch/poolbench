@@ -2,8 +2,6 @@
 
 **PoolBench** is a diagnostic benchmark that systematically evaluates 19 pooling strategies across 7 large language models and 18 semantic concepts, measuring how well each strategy captures concept-level information in hidden representations.
 
-> Paper submitted to NeurIPS 2026 Datasets & Benchmarks Track.
-
 ---
 
 ## Why PoolBench?
@@ -285,7 +283,6 @@ PRs are validated automatically by `.github/workflows/validate_submission.yml` (
 @article{poolbench2026,
   title   = {PoolBench: A Diagnostic Benchmark for Pooling Strategy Evaluation in LLM Representations},
   author  = {TODO},
-  journal = {NeurIPS Datasets and Benchmarks Track},
   year    = {2026},
   url     = {https://arxiv.org/abs/XXXX.XXXXX}
 }
@@ -295,4 +292,4 @@ PRs are validated automatically by `.github/workflows/validate_submission.yml` (
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+CC BY 4.0 — see [LICENSE](LICENSE).
