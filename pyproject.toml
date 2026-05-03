@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "poolbench"
 version = "0.1.0"
-description = "PoolBench: A Benchmark for Evaluating Pooling Strategies in LLM Representations"
+description = "PoolBench: A Benchmark for Token-Pooling Choices in Activation Steering"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"

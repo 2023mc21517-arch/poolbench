@@ -281,7 +281,7 @@ PRs are validated automatically by `.github/workflows/validate_submission.yml` (
 
 ```bibtex
 @article{poolbench2026,
-  title   = {PoolBench: A Diagnostic Benchmark for Pooling Strategy Evaluation in LLM Representations},
+  title   = {PoolBench: A Benchmark for Token-Pooling Choices in Activation Steering},
   author  = {TODO},
   year    = {2026},
   url     = {https://arxiv.org/abs/XXXX.XXXXX}
