@@ -93,7 +93,7 @@ def load_model(model_name: str, hf_id: str, device: str = "cuda"):
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
     model_kwargs = {
-        "torch_dtype": torch.bfloat16,
+        "dtype": torch.bfloat16,
         "device_map": device,
         "trust_remote_code": True,
     }
@@ -106,6 +106,11 @@ def load_model(model_name: str, hf_id: str, device: str = "cuda"):
         model = AutoModelForMaskedLM.from_pretrained(hf_id, **model_kwargs)
     else:
         # Causal LM or SSM (Mamba2) — both handled by AutoModelForCausalLM
+        if not _is_ssm(model_name):
+            # SDPA/Flash attention backends do not return attention maps with
+            # output_attentions=True. S1 and S3 need token attention inflow, so
+            # force eager attention for Transformer causal LMs.
+            model_kwargs["attn_implementation"] = "eager"
         model = AutoModelForCausalLM.from_pretrained(hf_id, **model_kwargs)
 
     model.eval()
