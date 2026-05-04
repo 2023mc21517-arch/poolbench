@@ -80,6 +80,7 @@ def load_jsonl(path: Path) -> list[dict]:
 
 def clean_text(text: str) -> str:
     """Basic whitespace normalisation shared across all concept builders."""
+    text = re.sub(r"(?i)<br\s*/?>", " ", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 

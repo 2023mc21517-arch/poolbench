@@ -74,7 +74,7 @@
           "type": "number",
           "minimum": 0.0,
           "maximum": 1.0,
-          "description": "Mean AUROC across all 18 concepts."
+          "description": "Mean AUROC across all 17 concepts."
         },
         "per_concept": {
           "type": "object",

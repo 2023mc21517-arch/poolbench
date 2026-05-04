@@ -8,7 +8,7 @@ from poolbench.data.concepts import CONCEPTS
 corpora = Path(__file__).parent.parent / "data" / "corpora"
 targets = ["conditionality", "frustration", "uncertainty", "planning",
            "hedging", "legal_formality", "deference", "causation",
-           "contrast", "math_certainty"]
+           "contrast"]
 
 for concept in targets:
     meta = CONCEPTS.get(concept, {})

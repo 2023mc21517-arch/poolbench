@@ -1,0 +1,100 @@
+name: Run Experiments (A100)
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Model to run (or 'all' for full sweep)"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - llama3_8b
+          - gemma2_9b
+          - mistral_7b
+          - qwen25_7b
+          - flan_t5_xl
+          - mamba2_2b7
+          - bert_base_uncased
+      device:
+        description: "CUDA device"
+        required: false
+        default: "cuda:0"
+
+jobs:
+  experiments:
+    runs-on: [self-hosted, a100]
+    timeout-minutes: 600
+
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      HF_HOME: /tmp/hf_cache
+      TRANSFORMERS_CACHE: /tmp/hf_cache
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install -e ".[dev]"
+          python -m spacy download en_core_web_sm
+
+      - name: Download corpus from HuggingFace
+        run: |
+          python - <<'EOF'
+          from huggingface_hub import snapshot_download
+          import shutil, os
+          from pathlib import Path
+
+          local_dir = Path("data/corpora_hf")
+          snapshot_download(
+              repo_id="nips234678/poolbench",
+              repo_type="dataset",
+              local_dir=str(local_dir),
+              token=os.environ["HF_TOKEN"],
+              ignore_patterns=["*.json", "*.md"],
+          )
+          # Move JSONL files into expected structure: data/corpora/<concept>/
+          dest = Path("data/corpora")
+          for jsonl in local_dir.rglob("*.jsonl"):
+              # path_in_repo was: data/corpora/<concept>/file.jsonl
+              rel = jsonl.relative_to(local_dir)
+              target = dest / Path(*rel.parts[2:])  # strip leading "data/corpora"
+              target.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy(jsonl, target)
+          print(f"Corpus ready at {dest}")
+          EOF
+
+      - name: Run experiments — all models
+        if: ${{ github.event.inputs.model == 'all' }}
+        run: |
+          for model in llama3_8b gemma2_9b mistral_7b qwen25_7b flan_t5_xl mamba2_2b7 bert_base_uncased; do
+            echo "=== Running $model ==="
+            python scripts/run_model.py --model "$model" --device "${{ github.event.inputs.device }}"
+          done
+
+      - name: Run experiments — single model
+        if: ${{ github.event.inputs.model != 'all' }}
+        run: |
+          python scripts/run_model.py \
+            --model "${{ github.event.inputs.model }}" \
+            --device "${{ github.event.inputs.device }}"
+
+      - name: Nemenyi significance test
+        if: ${{ github.event.inputs.model == 'all' }}
+        run: python scripts/run_model.py --nemenyi_only
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: poolbench-results-${{ github.event.inputs.model }}-${{ github.run_id }}
+          path: results/
+          retention-days: 30

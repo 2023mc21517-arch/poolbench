@@ -13,7 +13,7 @@ echo "Reproducing PoolBench on device: $DEVICE"
 # ── Step 1: Corpus construction (CPU, ~4 hours total) ─────────────────────────
 echo ""
 echo "=== Step 1: Building corpora ==="
-for concept in hedging legal_formality math_certainty frustration pos_sentiment \
+for concept in hedging legal_formality frustration imdb_sentiment \
                toxicity depression causation contrast conditionality academic_tone \
                code_docs bureaucratic uncertainty deference planning \
                negation_density numerical_precision; do

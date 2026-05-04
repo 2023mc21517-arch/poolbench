@@ -1,6 +1,6 @@
 """
 src/concepts.py
-All 18 PoolBench concepts with metadata.
+All 17 PoolBench concepts with metadata.
 Family labels are TBD — assigned post-hoc after results are collected.
 """
 
@@ -32,46 +32,46 @@ CONCEPTS = {
         "negative_def": "Same content rewritten in plain English without legal terms",
         "hf_source": "pile-of-law/pile-of-law",   # Rule-based rewrite
     },
-    "math_certainty": {
-        "family": "TBD",
-        "needs_matched_pairs": True,
-        "seed_words": [
-            "therefore", "necessarily", "it follows that", "QED",
-            "hence", "thus", "must be", "can be proven",
-        ],
-        "positive_def": "Passage contains mathematical certainty markers (proof language)",
-        "negative_def": "Same content without certainty markers, stated tentatively",
-        "hf_source": "lighteval/MATH",   # Natural parallel: solution steps vs. problem stmts
-    },
     "frustration": {
         "family": "TBD",
-        "needs_matched_pairs": True,
+        "needs_matched_pairs": False,
         "seed_words": [
-            "ugh", "frustrated", "come on", "ridiculous",
-            "why won't", "again", "seriously",
+            "ugh", "frustrated", "come on", "ridiculous", "why won't",
         ],
-        # "ugh" is a substring of "through"/"enough"/"although".
-        # "again" and "seriously" are too common in neutral text.
-        # Use word-boundary matching on the discriminative subset only.
+        # "again" and "seriously" removed — too common in neutral CC-News/Yelp text,
+        # only generated false-alarm warnings. Remaining words are genuine frustration markers.
         "contamination_markers": ["frustrated", "come on", "ridiculous", "why won't", "ugh"],
 
         "positive_def": "Passage expresses frustration or exasperation",
-        "negative_def": "Same content expressed neutrally",
-        "hf_source": "google-research-datasets/go_emotions",
-        "adversarial": True,
+        "negative_def": "Passage is neutral in tone — no frustration markers present",
+        "hf_source_pos": "Yelp/yelp_review_full (1-star) + sentence-transformers/reddit (angry subs)",
+        "hf_source_neg": "Yelp/yelp_review_full (3-star) + cc_news",
+        "source_note": (
+            "Independent natural sampling. Positives are 1-star Yelp reviews and Reddit posts "
+            "containing frustration markers. Negatives are 3-star Yelp reviews (same platform, "
+            "neutral tone — controls for review-style topic distribution) and CC-News articles. "
+            "Matched-pair rewrites were dropped because stripping 2-3 rare words from a "
+            "400-token passage creates near-identical paired texts that inflate probe AUROC "
+            "for reasons unrelated to the concept."
+        ),
     },
 
     # ── DENSE-LEXICAL ────────────────────────────────────────────────────
     # Signal distributed across many tokens.
     # INDEPENDENT sampling OK.
 
-    "pos_sentiment": {
+    "imdb_sentiment": {
         "family": "TBD",
         "needs_matched_pairs": False,
         "seed_words": [],
-        "positive_def": "Positive overall emotional valence throughout passage",
-        "negative_def": "Negative overall emotional valence throughout passage",
-        "hf_source": "stanfordnlp/sst2",
+        "positive_def": "Positive overall emotional valence in IMDb movie reviews",
+        "negative_def": "Negative overall emotional valence in IMDb movie reviews",
+        "hf_source": "yin001/imdb_dataset_positive_negative",
+        "source_note": (
+            "IMDb review sentiment corpus with both positive and negative classes. "
+            "HTML break artifacts such as <br /><br /> are stripped during text "
+            "normalization."
+        ),
     },
     "toxicity": {
         "family": "TBD",
@@ -96,8 +96,17 @@ CONCEPTS = {
         "needs_matched_pairs": False,
         "seed_words": [],
         "positive_def": "Passage expresses depressive affect or hopelessness",
-        "negative_def": "Passage expresses neutral or positive mental state",
-        "hf_source": "vibhorag23/depression_dataset_prepared",
+        "negative_def": "Passage expresses neutral, non-depressive Reddit discussion",
+        "hf_source": "mrjunos/depression-reddit-cleaned + dlb/mentalreddit",
+        "source_note": (
+            "Positive examples come from the depression label in "
+            "mrjunos/depression-reddit-cleaned. Negative examples come from general "
+            "Reddit comments in dlb/mentalreddit after removing explicit depression "
+            "markers. This concept uses a 200-500 token window and is treated as a "
+            "one-domain social dataset."
+        ),
+        "min_domains": 1,
+        "token_range": [200, 500],
     },
 
     # ── SYNTACTIC ────────────────────────────────────────────────────────
@@ -195,53 +204,60 @@ CONCEPTS = {
     # High-level reasoning property — no stable surface form.
     # INDEPENDENT sampling OK.
 
-    "uncertainty": {
+    "narrative": {
         "family": "TBD",
         "needs_matched_pairs": False,
-        "seed_words": [
-            "unclear", "uncertain", "may", "it is possible",
-            "debated", "no consensus", "unknown",
-        ],
-        # "may" is a modal auxiliary used in ~21 % of all academic text
-        # without conveying epistemic uncertainty. "unknown" is also common.
-        # Restrict contamination detection to the specific multi-word markers.
-        "contamination_markers": ["unclear", "uncertain", "it is possible", "debated", "no consensus"],
-
-        "positive_def": "Epistemic uncertainty expressed — writer does not know the answer",
-        "negative_def": "Writer is confident and certain about the same topic",
-        "hf_source": "scientific_papers",
+        "seed_words": [],
+        "positive_def": "Fictional narrative / creative storytelling — characters, events, emotional arcs",
+        "negative_def": "Encyclopaedic factual prose — no characters, no story arc, no narrative voice",
+        "hf_source_pos": "euclaise/writingprompts (story field)",
+        "hf_source_neg": "wikimedia/wikipedia (20231101.en)",
+        "source_note": (
+            "Positives are user-authored creative fiction from the WritingPrompts subreddit. "
+            "Negatives are Wikipedia article paragraphs. Wikipedia articles about fictional works "
+            "(novels, films, anime, etc.) are excluded from negatives to avoid story-summary contamination."
+        ),
     },
     "deference": {
         "family": "TBD",
         "needs_matched_pairs": False,
-        "seed_words": [
-            "according to", "as noted by", "following", "prior work",
-            "as demonstrated by", "established by",
-        ],
-        # "following" matches "the following section/results" (prep/adjective
-        # sense), not citation deference. Drop it from contamination check.
-        "contamination_markers": ["according to", "as noted by", "prior work", "as demonstrated by", "established by"],
-
-        "positive_def": "Writer defers to authority, convention, or another person's judgment",
-        "negative_def": "Writer asserts their own view confidently without deferring",
-        "hf_source": "allenai/scicite",
-        "adversarial": True,
+        "seed_words": [],
+        "positive_def": "Passage is polite or somewhat polite in tone",
+        "negative_def": "Passage is neutral or impolite in tone",
+        "hf_source": "Intel/polite-guard + allenai/scicite",
+        "source_note": (
+            "Positive labels: polite + somewhat polite (Intel polite-guard, customer_service domain); "
+            "background citation intent (allenai/scicite, academic_citation domain). "
+            "Negative labels: neutral + impolite (Intel polite-guard); result citation intent (scicite). "
+            "Both encode the same underlying concept — deferring to external authority vs. asserting "
+            "one's own position — in different registers. Token window intentionally relaxed to 8-128 "
+            "because both sources are sentence-level."
+        ),
+        "token_range": [8, 128],
+        "min_domains": 2,
     },
     "planning": {
         "family": "TBD",
         "needs_matched_pairs": False,
         "seed_words": [
             "plan", "will", "intend", "next step", "going to",
-            "goal", "objective", "strategy",
+            "goal", "objective", "strategy", "prepare", "how to",
         ],
         # "will" is a future auxiliary (~25 % of any text); "goal" is
         # too common in academic/business writing to be discriminative.
-        "contamination_markers": ["plan", "intend", "next step", "going to", "objective", "strategy"],
+        # Keep the rest as a lightweight filter for non-planning text.
+        "contamination_markers": ["plan", "intend", "next step", "going to", "objective", "strategy", "prepare", "how to"],
 
-        "positive_def": "Passage exhibits future-directed planning and forethought",
-        "negative_def": "Passage describes past actions or current state without future planning",
-        "hf_source": "tasksource/bigbench",
-        # Reddit removed (generic social posts failed quality checks); 2 domains is intentional.
+        "positive_def": "Passage gives goal-directed instructions or planning steps",
+        "negative_def": "Passage describes ordinary events or opinions without planning/instructional structure",
+        "hf_source": "gursi26/wikihow-cleaned + sentence-transformers/reddit + Yelp/yelp_review_full",
+        "source_note": (
+            "Positive examples come from the summary field of gursi26/wikihow-cleaned. "
+            "Negative examples come from human-generated Reddit and Yelp text, with "
+            "planning markers filtered out. This is intended as a human-authored "
+            "planning-vs-nonplanning corpus."
+        ),
+        # Two human-authored negative domains are intentional.
         "min_domains": 2,
     },
 

@@ -32,7 +32,7 @@ test-cov:
 data-concept:
 	python scripts/dataset_builder.py --concept $(CONCEPT)
 
-# Build all 18 concepts (sequential, ~4 hours):
+# Build all 17 concepts (sequential, ~4 hours):
 data-all:
 	python scripts/dataset_builder.py --all
 

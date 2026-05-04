@@ -62,34 +62,6 @@ def filter_legal_negative(text: str) -> bool:
     return not any(w in lowered for w in _LEGAL_MARKERS)
 
 
-# ── Sparse-lexical: math_certainty ───────────────────────────────────────────
-
-_MATH_CERTAINTY_MARKERS = [
-    "therefore", "hence", "thus", "it follows that",
-    "qed", "must be", "necessarily", "can be proven",
-    "we have shown", "this completes the proof",
-]
-
-# Problem-statement tokens (used for negatives from lighteval/MATH)
-_MATH_PROBLEM_TOKENS = ["find", "compute", "determine", "calculate", "prove that", "show that"]
-
-
-def filter_math_certainty_positive(text: str) -> bool:
-    lowered = text.lower()
-    return any(m in lowered for m in _MATH_CERTAINTY_MARKERS)
-
-
-def filter_math_certainty_negative(text: str) -> bool:
-    """
-    Negative = academic text WITHOUT mathematical certainty/proof markers.
-    Used with ArXiv abstracts as source: formal writing that describes results
-    without proof-language ("therefore/hence/QED/it follows that").
-    """
-    lowered = text.lower()
-    has_certainty = any(m in lowered for m in _MATH_CERTAINTY_MARKERS)
-    return not has_certainty
-
-
 # ── Dense-lexical: frustration (go_emotions labels) ──────────────────────────
 
 _FRUSTRATION_LABELS = {"frustrated", "furious", "annoyed", "anger", "disgust"}
@@ -104,7 +76,7 @@ def filter_frustration_negative_label(label: str) -> bool:
     return label.lower() in _NEUTRAL_LABELS
 
 
-# ── Dense-lexical: pos_sentiment (SST-2 / Yelp labels) ───────────────────────
+# ── Dense-lexical: imdb_sentiment (IMDb movie-review labels) ─────────────────
 
 def filter_sentiment_positive_label(label: int) -> bool:
     """SST-2: label 1 = positive."""
@@ -128,12 +100,24 @@ def filter_toxicity_negative(toxicity_score: float) -> bool:
 
 # ── Dense-lexical: depression ────────────────────────────────────────────────
 
+def _depression_label_norm(label: str) -> str:
+    return re.sub(r"[\s_-]+", " ", str(label).strip().lower())
+
+
 def filter_depression_positive_label(label: str) -> bool:
-    return str(label).lower() in {"1", "depressed", "depression"}
+    norm = _depression_label_norm(label)
+    return norm in {
+        "1", "depressed", "depression", "positive", "pos", "yes", "true", "depressive"
+    }
 
 
 def filter_depression_negative_label(label: str) -> bool:
-    return str(label).lower() in {"0", "not depressed", "control"}
+    norm = _depression_label_norm(label)
+    return norm in {
+        "0", "not depressed", "not depression", "non depressed", "non depression",
+        "nondepressed", "nondepression", "notdepressed", "notdepression",
+        "control", "negative", "neg", "no", "false",
+    }
 
 
 # ── Syntactic: causation (AltLex labels) ─────────────────────────────────────
@@ -339,7 +323,19 @@ def filter_deference_negative_label(label: str) -> bool:
     return str(label).lower() == "result"
 
 
-# ── Semantic-abstract: planning (BigBench goal_step_wikihow) ─────────────────
+# ── Semantic-abstract: deference (Intel/polite-guard labels) ────────────────
+
+def filter_polite_guard_positive_label(label: str) -> bool:
+    """Polite-guard: 'polite' and 'somewhat polite' are positive labels."""
+    return str(label).strip().lower() in {"polite", "somewhat polite"}
+
+
+def filter_polite_guard_negative_label(label: str) -> bool:
+    """Polite-guard: 'neutral' and 'impolite' are negative labels."""
+    return str(label).strip().lower() in {"neutral", "impolite"}
+
+
+# ── Semantic-abstract: planning (human-authored planning text) ──────────────
 
 def filter_planning_positive_label(correct: bool) -> bool:
     """Positive = step is correct sub-action for the stated goal."""
@@ -449,37 +445,21 @@ def filter_deference_negative(text: str) -> bool:
 # ── Semantic-abstract: planning (text-based, for multi-domain) ───────────────
 
 _PLANNING_POS_MARKERS = [
-    "we will ", "future work", "we plan to", "we aim to", "we intend to",
-    "will be investigated", "will be explored", "will be extended",
-    "in future", "as future work", "will investigate", "will extend",
-    "future direction", "future research", "left for future",
-    "will be applied", "will be evaluated", "will be developed",
-    "will be studied", "will be examined", "we hope to", "we seek to",
-    "next step", "next steps", "upcoming work", "we target",
-]
-
-_PLANNING_NEG_MARKERS = [
-    "we show", "we present", "we demonstrate", "we introduce",
-    "we propose", "we describe", "we report", "we develop",
-    "we prove", "we establish", "we analyse", "we analyze",
-    "this paper presents", "this work presents",
+    "plan", "plans", "planning", "intend", "intends", "next step",
+    "next steps", "goal", "goals", "objective", "objectives",
+    "strategy", "strategies", "prepare", "preparing", "how to",
+    "step-by-step", "step by step", "going to",
 ]
 
 
 def filter_planning_positive(text: str) -> bool:
-    # Require ≥1 planning marker — the markers are specific enough that a single
-    # occurrence reliably indicates forward-looking/planning language.
-    # ≥2 threshold was too strict: only 407 valid texts exist in all of ArXiv.
     lowered = text.lower()
     return any(m in lowered for m in _PLANNING_POS_MARKERS)
 
 
 def filter_planning_negative(text: str) -> bool:
     lowered = text.lower()
-    return (
-        any(m in lowered for m in _PLANNING_NEG_MARKERS) and
-        not any(m in lowered for m in _PLANNING_POS_MARKERS)
-    )
+    return not any(m in lowered for m in _PLANNING_POS_MARKERS)
 
 
 # ── Dense-lexical: frustration (text-based, for multi-domain) ────────────────
@@ -499,8 +479,9 @@ _FRUSTRATION_TEXT_RE = re.compile(
 )
 
 _NON_FRUSTRATION_TEXT_RE = re.compile(
-    r'\b(frustrat|furious|infuriat|outrag|terrible|horrible|worst|'
-    r'angry|annoy|upset|disappointing|awful|pathetic|atrocious)\b',
+    r'\b(frustrat|furious|infuriat|outrag|exasperat|terrible|horrible|worst|'
+    r'angry|annoy|upset|disappointing|awful|pathetic|atrocious|ridiculous|ugh)\b'
+    r'|come\s+on\b|why\s+won.?t\b',
     re.IGNORECASE,
 )
 
@@ -513,7 +494,7 @@ def filter_frustration_negative_text(text: str) -> bool:
     return not bool(_NON_FRUSTRATION_TEXT_RE.search(text))
 
 
-# ── Dense-lexical: pos_sentiment (text-based, for multi-domain) ──────────────
+# ── Dense-lexical: imdb_sentiment (text-based, for multi-domain) ─────────────
 
 _POS_SENT_RE = re.compile(
     r'\b(excellent|wonderful|amazing|fantastic|outstanding|love|perfect|'
@@ -529,11 +510,11 @@ _NEG_SENT_RE = re.compile(
 )
 
 
-def filter_pos_sentiment_positive_text(text: str) -> bool:
+def filter_imdb_sentiment_positive_text(text: str) -> bool:
     return bool(_POS_SENT_RE.search(text)) and not bool(_NEG_SENT_RE.search(text))
 
 
-def filter_pos_sentiment_negative_text(text: str) -> bool:
+def filter_imdb_sentiment_negative_text(text: str) -> bool:
     # Require ≥2 negative sentiment words so a single incidental "bad" in a
     # neutral news or informational article does not qualify
     return len(_NEG_SENT_RE.findall(text)) >= 2 and not bool(_POS_SENT_RE.search(text))
@@ -648,6 +629,12 @@ def filter_depression_negative_text(text: str) -> bool:
     )
 
 
+def filter_depression_negative_general_text(text: str) -> bool:
+    # Broader negative filter for general Reddit comments: keep passages that do
+    # not mention explicit depression markers.
+    return not bool(_NON_DEPRESSION_TEXT_RE.search(text))
+
+
 # ── Registry: get filter by (concept, label) ─────────────────────────────────
 
 TEXT_FILTERS: dict[tuple[str, str], Callable[[str], bool]] = {
@@ -655,8 +642,6 @@ TEXT_FILTERS: dict[tuple[str, str], Callable[[str], bool]] = {
     ("hedging",             "neg"): filter_hedging_negative,
     ("legal_formality",     "pos"): filter_legal_positive,
     ("legal_formality",     "neg"): filter_legal_negative,
-    ("math_certainty",      "pos"): filter_math_certainty_positive,
-    ("math_certainty",      "neg"): filter_math_certainty_negative,
     ("academic_tone",       "pos"): filter_academic_positive,
     ("academic_tone",       "neg"): filter_academic_negative,
     ("code_docs",           "pos"): filter_code_docs_positive,
@@ -678,8 +663,8 @@ TEXT_FILTERS: dict[tuple[str, str], Callable[[str], bool]] = {
     ("negation_density",    "neg"): filter_negation_negative,
     ("numerical_precision", "pos"): filter_numerical_positive,
     ("numerical_precision", "neg"): filter_numerical_negative,
-    ("pos_sentiment",       "pos"): filter_pos_sentiment_positive_text,
-    ("pos_sentiment",       "neg"): filter_pos_sentiment_negative_text,
+    ("imdb_sentiment",      "pos"): filter_imdb_sentiment_positive_text,
+    ("imdb_sentiment",      "neg"): filter_imdb_sentiment_negative_text,
     ("toxicity",            "pos"): filter_toxicity_positive_text,
     ("toxicity",            "neg"): filter_toxicity_negative_text,
     ("depression",          "pos"): filter_depression_positive_text,
@@ -690,3 +675,46 @@ TEXT_FILTERS: dict[tuple[str, str], Callable[[str], bool]] = {
 def get_text_filter(concept: str, label: str) -> Callable[[str], bool]:
     """Returns text-based filter, or a permissive default if not registered."""
     return TEXT_FILTERS.get((concept, label), lambda _: True)
+
+
+# ── Semantic-abstract: narrative (fiction vs factual prose) ──────────────────
+# Positives: euclaise/writingprompts story field — user-authored creative fiction.
+# Negatives: wikimedia/wikipedia text field — encyclopaedic factual prose.
+# No seed-word filter needed: the dataset source is the signal.
+# The negative filter rejects Wikipedia stubs and articles about fictional works
+# (to avoid factual descriptions of stories leaking in as negatives).
+
+_NARRATIVE_NOISE_RE = re.compile(
+    r'\b(?:novel|film|movie|television\s+series|video\s+game|anime|manga|'
+    r'fictional|protagonist|storyline|plot|screenplay|episode|season\s+\d)\b',
+    re.IGNORECASE,
+)
+
+_NARRATIVE_FICTION_MARKERS = re.compile(
+    r'\b(?:he\s+said|she\s+said|they\s+said|whispered|shouted|replied|muttered|'
+    r'once\s+upon|the\s+next\s+morning|suddenly|he\s+felt|she\s+felt|'
+    r'her\s+heart|his\s+heart|looked\s+around|walked\s+(?:into|toward|away)|'
+    r'stared\s+(?:at|into)|stepped\s+(?:forward|back|out|in)|'
+    r'tears\s+(?:in|filled|streamed))\b',
+    re.IGNORECASE,
+)
+
+
+def filter_narrative_positive(text: str) -> bool:
+    """
+    Accept WritingPrompts story field entries.
+    Rejects entries that are purely a prompt title (no actual story body)
+    by requiring at least one fiction marker.
+    """
+    return bool(_NARRATIVE_FICTION_MARKERS.search(text))
+
+
+def filter_narrative_negative(text: str) -> bool:
+    """
+    Accept Wikipedia paragraphs as factual/non-narrative negatives.
+    Rejects:
+    - Articles whose topic IS fiction (novels, films, anime, etc.) — they
+      contain story summaries which are narrative in nature.
+    - Stubs / very short articles (length check happens upstream via is_valid_length).
+    """
+    return not bool(_NARRATIVE_NOISE_RE.search(text))

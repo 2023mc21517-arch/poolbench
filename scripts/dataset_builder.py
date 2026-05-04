@@ -7,7 +7,7 @@ Usage:
     # Build a single concept (recommended — run sequentially):
     python dataset_builder.py --concept hedging
 
-    # Build all 18 concepts one by one:
+    # Build all 17 concepts one by one:
     python dataset_builder.py --all
 
     # Dry-run: show how many passages would be collected, don't save:
@@ -38,19 +38,16 @@ from poolbench.utils import (
 from poolbench.filters import (
     filter_hedging_positive, filter_hedging_negative,
     filter_legal_positive, filter_legal_negative,
-    filter_math_certainty_positive, filter_math_certainty_negative,
     filter_frustration_positive_label, filter_frustration_negative_label,
-    filter_sentiment_positive_label, filter_sentiment_negative_label,
     filter_toxicity_positive, filter_toxicity_negative,
-    filter_depression_positive_label, filter_depression_negative_label,
+    filter_depression_positive_label,
     filter_causation_positive_label, filter_causation_negative_label,
     filter_contrast_positive_label, filter_contrast_negative_label,
     filter_conditionality_positive_label, filter_conditionality_negative_label,
     filter_academic_positive, filter_academic_negative,
     filter_code_docs_positive, filter_code_docs_negative,
     filter_bureaucratic_positive, filter_bureaucratic_negative,
-    filter_uncertainty_positive, filter_uncertainty_negative,
-    filter_deference_positive_label, filter_deference_negative_label,
+    filter_narrative_positive, filter_narrative_negative,
     filter_planning_positive_label, filter_planning_negative_label,
     filter_negation_positive, filter_negation_negative,
     filter_numerical_positive, filter_numerical_negative,
@@ -382,6 +379,83 @@ def _stream_independent(
     return texts, domains
 
 
+def _pick_text_field(example: dict) -> str:
+    """Return the first non-empty text-like field from a dataset example."""
+    for key in ("text", "sentence", "utterance", "content", "prompt", "response", "body", "comment"):
+        value = example.get(key)
+        if isinstance(value, str) and value.strip():
+            return clean_text(value)
+    return ""
+
+
+def _label_name(example: dict, label_names: list[str] | None = None) -> str:
+    """Normalise a dataset label to lowercase text."""
+    raw = example.get("label")
+    if isinstance(raw, str):
+        return raw.strip().lower()
+    if label_names and isinstance(raw, int) and 0 <= raw < len(label_names):
+        return label_names[raw].strip().lower()
+    return str(raw).strip().lower()
+
+
+def _collect_top_token_examples(
+    dataset_name: str,
+    keep_labels: set[str],
+    n_needed: int,
+    tok,
+    domain: str = "social",
+    min_tokens: int = 8,
+    max_tokens: int = 128,
+) -> tuple[list[str], list[str]]:
+    """
+    Collect the longest examples for a labelled dataset.
+    The resulting corpus is token-length filtered first, then sorted by token count
+    so we preferentially keep the most information-rich short-form examples.
+    """
+    from datasets import load_dataset
+
+    ds = load_dataset(dataset_name, split="train")
+    label_feature = ds.features.get("label") if getattr(ds, "features", None) else None
+    label_names = getattr(label_feature, "names", None) if label_feature is not None else None
+
+    buckets: dict[str, list[tuple[int, str]]] = {label: [] for label in keep_labels}
+    for ex in ds:
+        text = _pick_text_field(ex)
+        if not text:
+            continue
+        label = _label_name(ex, label_names)
+        if label not in keep_labels:
+            continue
+        n_tok = token_count(text, tok)
+        if not (min_tokens <= n_tok <= max_tokens):
+            continue
+        buckets[label].append((n_tok, text))
+
+    texts: list[str] = []
+    domains: list[str] = []
+    per_label_target = max(1, n_needed // max(1, len(keep_labels)))
+    extra = n_needed - per_label_target * len(keep_labels)
+
+    for idx, label in enumerate(sorted(keep_labels)):
+        target = per_label_target + (1 if idx < extra else 0)
+        chosen = sorted(buckets[label], key=lambda item: item[0], reverse=True)[:target]
+        texts.extend(text for _, text in chosen)
+        domains.extend([domain] * len(chosen))
+
+    if len(texts) < n_needed:
+        raise ValueError(
+            f"{dataset_name}: only collected {len(texts)} examples "
+            f"for labels {sorted(keep_labels)} within token range [{min_tokens}, {max_tokens}]"
+        )
+
+    # Keep the longest available examples overall for the final cap.
+    paired = sorted(zip(texts, domains), key=lambda item: token_count(item[0], tok), reverse=True)
+    paired = paired[:n_needed]
+    texts = [p[0] for p in paired]
+    domains = [p[1] for p in paired]
+    return texts, domains
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Per-concept builders
 # Each builder returns (pos_passages, neg_passages, pos_domains, neg_domains,
@@ -447,177 +521,105 @@ def build_legal_formality(n_total: int):
     return pos, neg, p_dom, n_dom, pair_ids
 
 
-def build_math_certainty(n_total: int):
+def build_frustration(n_total: int):
     """
-    Independent samples (NOT matched pairs).
-    Positives: NuminaMath-CoT solutions — competition math proofs with "therefore/thus/hence"
-      in rich chain-of-thought style solutions. 859k+ examples, far more than hendrycks_math.
-    Negatives: ArXiv abstracts — academic text without mathematical certainty markers.
+    Independent natural sampling — NOT matched pairs.
+    Positives: Yelp 1-star reviews (review) + Reddit angry posts (social).
+    Negatives: Yelp 3-star reviews (review, same platform → controls topic distribution)
+               + CC-News (news).
+    Matched-pair rewrites were dropped: stripping 2–3 rare frustration words from a
+    400-token passage creates near-identical pairs that inflate probe AUROC artificially.
+    `_stream_independent` is used throughout — Yelp label filtering happens via the
+    text-based filter, which already requires frustration markers for positives and
+    bans them from negatives.
     """
-    from datasets import load_dataset
+    from poolbench.filters import filter_frustration_positive_text, filter_frustration_negative_text
     tok = get_tokenizer()
+    n_half = (n_total + 1) // 2
 
     pos, neg, p_dom, n_dom = [], [], [], []
 
-    # Positives: NuminaMath-CoT solutions (competition math with explicit proof language)
-    # The 'solution' field contains step-by-step reasoning with "therefore", "hence", "thus".
-    print("  Loading AI-MO/NuminaMath-CoT for math_certainty positives ...")
-    ds_numina = load_dataset("AI-MO/NuminaMath-CoT", split="train", streaming=True)
-    for ex in ds_numina:
-        if len(pos) >= n_total:
-            break
-        solution = clean_text(ex.get("solution", ""))
-        if not is_valid_length(solution, tok):
-            continue
-        if not filter_math_certainty_positive(solution):
-            continue
-        pos.append(solution)
-        p_dom.append("math")
+    # ── Positives: Yelp 1-star reviews (review domain) ───────────────────────
+    print("  Loading Yelp/yelp_review_full for frustration positives (review) ...")
+    p1, pd1 = _stream_independent(
+        "Yelp/yelp_review_full", None, "text", "review",
+        filter_frustration_positive_text, n_half, tok,
+    )
+    pos += p1; p_dom += pd1
 
-    # Negatives: ArXiv abstracts — formal academic writing WITHOUT certainty markers
-    # These describe results observationally ("we show", "results suggest") rather
-    # than with deductive proof certainty ("therefore", "it follows that", "QED").
-    print("  Loading gfissore/arxiv-abstracts-2021 for math_certainty negatives ...")
-    ds_arxiv = load_dataset("gfissore/arxiv-abstracts-2021", split="train", streaming=True)
-    for ex in ds_arxiv:
-        if len(neg) >= n_total:
-            break
-        text = clean_text(ex.get("abstract", ""))
-        if not is_valid_length(text, tok):
-            continue
-        if filter_math_certainty_negative(text):
-            neg.append(text)
-            n_dom.append("academic")
+    # ── Positives: Reddit (social domain) ────────────────────────────────────
+    if len(pos) < n_total:
+        print("  Loading sentence-transformers/reddit for frustration positives (social) ...")
+        p2, pd2 = _stream_independent(
+            "sentence-transformers/reddit", None, "body", "social",
+            filter_frustration_positive_text, n_total - len(pos), tok,
+        )
+        pos += p2; p_dom += pd2
 
-    # Third domain: CC-News — general news text without proof markers (adds "news" domain)
-    print("  Loading cc_news for math_certainty negatives (news domain) ...")
-    n_news_target = n_total // 3
-    n_news = 0
-    ds_news = load_dataset("cc_news", split="train", streaming=True)
-    for ex in ds_news:
-        if n_news >= n_news_target:
-            break
-        full_text = clean_text(ex.get("text", "") or "")
-        if not full_text:
-            continue
-        for chunk in _chunk_tokens(full_text, tok):
-            if n_news >= n_news_target:
-                break
-            if not is_valid_length(chunk, tok):
-                continue
-            if filter_math_certainty_negative(chunk):
-                neg.append(chunk)
-                n_dom.append("news")
-                n_news += 1
+    # ── Negatives: Yelp reviews (neutral tone, same platform) ────────────────
+    print("  Loading Yelp/yelp_review_full for frustration negatives (review) ...")
+    n1, nd1 = _stream_independent(
+        "Yelp/yelp_review_full", None, "text", "review",
+        filter_frustration_negative_text, n_half, tok,
+    )
+    neg += n1; n_dom += nd1
+
+    # ── Negatives: CC-News (news domain) ─────────────────────────────────────
+    if len(neg) < n_total:
+        print("  Loading cc_news for frustration negatives (news) ...")
+        n2, nd2 = _stream_independent(
+            "cc_news", None, "text", "news",
+            filter_frustration_negative_text, n_total - len(neg), tok,
+            chunk_long_docs=True,
+        )
+        neg += n2; n_dom += nd2
 
     return pos, neg, p_dom, n_dom, None
 
 
-def build_frustration(n_total: int):
+def build_imdb_sentiment(n_total: int):
     """
-    Matched-pair corpus: frustration marker removed/softened to create neutral negative.
-    3 domains: review (Yelp), social (Reddit), news (CC-News).
-    """
-    from datasets import load_dataset
-    from poolbench.rewriters import rewrite_frustration
-    from poolbench.filters import filter_frustration_positive_text
-    tok = get_tokenizer()
-    n_sec = n_total // 3
+    Single-source IMDb sentiment corpus.
 
-    pos, neg, p_dom, n_dom, pair_ids = [], [], [], [], []
-
-    # Source 1: Yelp 1-star reviews (review domain)
-    print("  Loading Yelp/yelp_review_full for frustration (review domain) ...")
-    ds_yelp = load_dataset("Yelp/yelp_review_full", split="train", streaming=True)
-    for ex in ds_yelp:
-        text = clean_text(ex.get("text", ""))
-        label = int(ex.get("label", -1))
-        if label != 0 or not is_valid_length(text, tok):
-            continue
-        if not filter_frustration_positive_text(text):
-            continue
-        rewritten = rewrite_frustration(text)
-        if rewritten is None or not is_valid_length(rewritten, tok):
-            continue
-        if not is_length_matched(text, rewritten, tok):
-            continue
-        pos.append(text); neg.append(rewritten)
-        p_dom.append("review"); n_dom.append("review")
-        pair_ids.append(f"frustration_pair_{len(pair_ids):05d}")
-        if len(pos) >= n_total:
-            break
-
-    # Sources 2 & 3: Reddit (social) and CC-News (news)
-    for ds_name, config, field, domain, n_target, chunk in [
-        ("sentence-transformers/reddit", None, "body",  "social", n_sec, False),
-        ("cc_news",                      None, "text",  "news",   n_sec, True),
-    ]:
-        _p, _n, _pd, _nd, _pids = _stream_rewrite_pairs(
-            ds_name, config, field, domain,
-            filter_frustration_positive_text, rewrite_frustration,
-            n_target, tok, "frustration", len(pos), chunk,
-        )
-        pos += _p; neg += _n; p_dom += _pd; n_dom += _nd; pair_ids += _pids
-
-    return pos, neg, p_dom, n_dom, pair_ids
-
-
-def build_pos_sentiment(n_total: int):
-    """
-    3 domains: review (Yelp), movies (IMDB), product (Amazon).
-    Label-based sampling — no seed-word filtering needed.
-    Yelp: 5-star = pos, 1-star = neg. IMDB: label=1 = pos, label=0 = neg.
-    Amazon: label=1 = pos, label=0 = neg (title+content combined for length).
+    Positive and negative passages are drawn from the same review dataset so the
+    benchmark measures sentiment polarity rather than source/domain shift.
+    HTML break artifacts (e.g. <br /><br />) are stripped by clean_text().
     """
     from datasets import load_dataset
-    tok = get_tokenizer()
-    n_yelp = n_total // 2   # 500 from Yelp (reliable, high-yield)
-    n_imdb = n_total // 4   # 250 from IMDB (movies domain complement)
 
+    tok = get_tokenizer()
     pos, neg, p_dom, n_dom = [], [], [], []
 
-    print("  Loading Yelp/yelp_review_full for pos_sentiment ...")
-    ds_yelp = load_dataset("Yelp/yelp_review_full", split="train", streaming=True)
-    for ex in ds_yelp:
-        text = clean_text(ex.get("text", ""))
-        label = int(ex.get("label", -1))  # 0=1-star, 4=5-star
-        if not is_valid_length(text, tok):
-            continue
-        if label == 4 and len(pos) < n_yelp:
-            pos.append(text); p_dom.append("restaurant")
-        elif label == 0 and len(neg) < n_yelp:
-            neg.append(text); n_dom.append("restaurant")
-        if len(pos) >= n_yelp and len(neg) >= n_yelp:
-            break
+    def _is_positive(label) -> bool:
+        if isinstance(label, str):
+            norm = label.strip().lower()
+            return norm in {"positive", "pos", "1", "true"}
+        try:
+            return int(label) == 1
+        except Exception:
+            return False
 
-    print("  Loading IMDB for pos_sentiment (movies domain) ...")
-    ds_imdb = load_dataset("imdb", split="train", streaming=True)
+    def _is_negative(label) -> bool:
+        if isinstance(label, str):
+            norm = label.strip().lower()
+            return norm in {"negative", "neg", "0", "false"}
+        try:
+            return int(label) == 0
+        except Exception:
+            return False
+
+    print("  Loading yin001/imdb_dataset_positive_negative for imdb_sentiment ...")
+    ds_imdb = load_dataset("yin001/imdb_dataset_positive_negative", split="train", streaming=True)
     for ex in ds_imdb:
-        text = clean_text(ex.get("text", ""))
-        label = int(ex.get("label", -1))  # 1=positive, 0=negative
-        if not is_valid_length(text, tok):
+        raw = ex.get("review", ex.get("text", "")) or ""
+        lbl = ex.get("sentiment", ex.get("label", ex.get("labels", None)))
+        if not raw or not is_valid_length(clean_text(raw), tok):
             continue
-        if label == 1 and len(pos) < n_yelp + n_imdb:
-            pos.append(text); p_dom.append("movies")
-        elif label == 0 and len(neg) < n_yelp + n_imdb:
-            neg.append(text); n_dom.append("movies")
-        if len(pos) >= n_yelp + n_imdb and len(neg) >= n_yelp + n_imdb:
-            break
-
-    print("  Loading fancyzhx/amazon_polarity for pos_sentiment (product domain) ...")
-    ds_amz = load_dataset("fancyzhx/amazon_polarity", split="train", streaming=True)
-    for ex in ds_amz:
-        text = clean_text((ex.get("title", "") or "") + " " + (ex.get("content", "") or ""))
-        label = int(ex.get("label", -1))  # 1=positive, 0=negative
-        if not is_valid_length(text, tok):
-            continue
-        # Reject non-English reviews: require ≥85% ASCII characters
-        if len(text) > 0 and sum(1 for c in text if ord(c) < 128) / len(text) < 0.85:
-            continue
-        if label == 1 and len(pos) < n_total:
-            pos.append(text); p_dom.append("product")
-        elif label == 0 and len(neg) < n_total:
-            neg.append(text); n_dom.append("product")
+        text = clean_text(raw)
+        if _is_positive(lbl) and len(pos) < n_total:
+            pos.append(text); p_dom.append("review")
+        elif _is_negative(lbl) and len(neg) < n_total:
+            neg.append(text); n_dom.append("review")
         if len(pos) >= n_total and len(neg) >= n_total:
             break
 
@@ -638,12 +640,14 @@ def build_toxicity(n_total: int):
       3. google/civil_comments — score-based fallback to fill any shortfall.
     """
     import pandas as pd
+    import hashlib
     from datasets import load_dataset
     from poolbench.filters import filter_toxicity_positive_text
     tok = get_tokenizer()
     n_sec = n_total // 3   # ~333 per source
 
     pos, neg, p_dom, n_dom = [], [], [], []
+    seen_pos, seen_neg = set(), set()
 
     def _len_ok(text: str, min_tokens: int) -> bool:
         n_tok = token_count(text, tok)
@@ -651,6 +655,24 @@ def build_toxicity(n_total: int):
 
     def _domain_count(domains: list[str], name: str) -> int:
         return sum(1 for d in domains if d == name)
+
+    def _add_pos(text: str, domain: str) -> bool:
+        h = hashlib.md5(text.encode()).hexdigest()
+        if h in seen_pos:
+            return False
+        seen_pos.add(h)
+        pos.append(text)
+        p_dom.append(domain)
+        return True
+
+    def _add_neg(text: str, domain: str) -> bool:
+        h = hashlib.md5(text.encode()).hexdigest()
+        if h in seen_neg:
+            return False
+        seen_neg.add(h)
+        neg.append(text)
+        n_dom.append(domain)
+        return True
 
     # Source 1: surge-ai toxicity CSV (binary labeled — "online" domain)
     _SURGE_URL = (
@@ -666,9 +688,9 @@ def build_toxicity(n_total: int):
                 continue
             label = str(row.get("is_toxic", "")).strip().lower()
             if label in {"toxic", "1", "true"} and len(pos) < n_sec:
-                pos.append(text); p_dom.append("online")
+                _add_pos(text, "online")
             elif label in {"not toxic", "0", "false"} and len(neg) < n_sec:
-                neg.append(text); n_dom.append("online")
+                _add_neg(text, "online")
     except Exception as e:
         print(f"  [WARN] surge-ai CSV load failed ({e})")
 
@@ -687,9 +709,9 @@ def build_toxicity(n_total: int):
             continue
         cls = int(ex.get("class", 2))
         if cls in (0, 1) and _domain_count(p_dom, "twitter") < n_sec:
-            pos.append(text); p_dom.append("twitter")
+            _add_pos(text, "twitter")
         elif cls == 2 and _domain_count(n_dom, "twitter") < n_sec:
-            neg.append(text); n_dom.append("twitter")
+            _add_neg(text, "twitter")
 
     # Source 3: civil_comments with stricter intent guardrails (comments domain)
     # High score alone is insufficient: neutral/critical discussion can score high.
@@ -705,9 +727,9 @@ def build_toxicity(n_total: int):
         score = float(ex.get("toxicity", 0.0))
         is_hostile_text = filter_toxicity_positive_text(text)
         if score >= 0.7 and is_hostile_text and _domain_count(p_dom, "comments") < n_sec:
-            pos.append(text); p_dom.append("comments")
+            _add_pos(text, "comments")
         elif score <= 0.1 and (not is_hostile_text) and _domain_count(n_dom, "comments") < n_sec:
-            neg.append(text); n_dom.append("comments")
+            _add_neg(text, "comments")
 
     # Shortfall top-up: prioritize explicit-label sources (surge-ai, davidson),
     # then strict civil_comments fallback.
@@ -724,9 +746,9 @@ def build_toxicity(n_total: int):
                     continue
                 label = str(row.get("is_toxic", "")).strip().lower()
                 if label in {"toxic", "1", "true"} and len(pos) < n_total:
-                    pos.append(text); p_dom.append("online")
+                    _add_pos(text, "online")
                 elif label in {"not toxic", "0", "false"} and len(neg) < n_total:
-                    neg.append(text); n_dom.append("online")
+                    _add_neg(text, "online")
         except Exception:
             pass
 
@@ -742,9 +764,9 @@ def build_toxicity(n_total: int):
                     continue
                 cls = int(ex.get("class", 2))
                 if cls in (0, 1) and len(pos) < n_total:
-                    pos.append(text); p_dom.append("twitter")
+                    _add_pos(text, "twitter")
                 elif cls == 2 and len(neg) < n_total:
-                    neg.append(text); n_dom.append("twitter")
+                    _add_neg(text, "twitter")
 
         # strict civil_comments final fallback
         if len(pos) < n_total or len(neg) < n_total:
@@ -758,73 +780,170 @@ def build_toxicity(n_total: int):
                 score = float(ex.get("toxicity", 0.0))
                 is_hostile_text = filter_toxicity_positive_text(text)
                 if score >= 0.7 and is_hostile_text and len(pos) < n_total:
-                    pos.append(text); p_dom.append("comments")
+                    _add_pos(text, "comments")
                 elif score <= 0.1 and (not is_hostile_text) and len(neg) < n_total:
-                    neg.append(text); n_dom.append("comments")
+                    _add_neg(text, "comments")
 
     return pos, neg, p_dom, n_dom, None
 
 
 def build_depression(n_total: int):
     """
-    3 domains: social_mh (Reddit mental health subreddits), social (Reddit general),
-    news (CC-News — news stories about mental health with first-person accounts).
-    Independent samples.
+    Hybrid Reddit corpus.
+    Positive = depression examples from mrjunos/depression-reddit-cleaned.
+    Negative = general Reddit comments from dlb/mentalreddit, filtered to remove
+    explicit depression markers.
+    This concept uses a 200-500 token window and then keeps the longest valid
+    examples so the split stays dense-lexical and length-controlled.
     """
     from datasets import load_dataset
-    from poolbench.filters import filter_depression_positive_text, filter_depression_negative_text
+    from poolbench.filters import filter_depression_negative_general_text
     tok = get_tokenizer()
-    n_sec = n_total // 3
-
     pos, neg, p_dom, n_dom = [], [], [], []
 
-    # Source 1: solomonk/reddit_mental_health_posts (subreddit-based)
-    print("  Loading solomonk/reddit_mental_health_posts ...")
-    _DEPRESSION_SUBS = {"depression", "SuicideWatch", "Anxiety", "mentalhealth",
-                        "depression_help", "MentalHealthSupport"}
-    _CONTROL_SUBS = {"AskReddit", "AskScience", "todayilearned", "worldnews",
-                     "technology", "science", "explainlikeimfive"}
-    ds_mh = load_dataset("solomonk/reddit_mental_health_posts", split="train", streaming=True)
-    for ex in ds_mh:
-        text = clean_text(ex.get("body", "") or ex.get("title", ""))
-        sub = ex.get("subreddit", "")
-        if not is_valid_length(text, tok):
+    pos_url = (
+        "https://huggingface.co/datasets/mrjunos/"
+        "depression-reddit-cleaned/resolve/main/depression_reddit_cleaned_ds.csv"
+    )
+    print("  Loading mrjunos/depression-reddit-cleaned ...")
+    ds_pos = load_dataset(
+        "csv",
+        data_files=pos_url,
+        split="train",
+    )
+
+    pos_candidates: list[tuple[int, str]] = []
+    for ex in ds_pos:
+        text = clean_text(_pick_text_field(ex))
+        if not text:
             continue
-        if sub in _DEPRESSION_SUBS and len(pos) < n_total:
-            pos.append(text); p_dom.append("social_mh")
-        elif (sub in _CONTROL_SUBS
-              and filter_depression_negative_text(text)
-              and len(neg) < n_total):
-            neg.append(text); n_dom.append("social_mh")
-        if len(pos) >= n_total and len(neg) >= n_total:
+        n_tok = token_count(text, tok)
+        if not (200 <= n_tok <= 500):
+            continue
+        raw_label = ex.get("labels", ex.get("label"))
+        if raw_label is None:
+            continue
+        label = str(raw_label).strip().lower()
+        if filter_depression_positive_label(label):
+            pos_candidates.append((n_tok, text))
+
+    # ── Supplementary positives: second pass of mrjunos with wider window ───
+    # mrjunos/depression-reddit-cleaned yields ~479 in strict 200-500 window.
+    # For the remaining ~221, widen to 180-520 tokens — a ±20 token relaxation
+    # that stays well within the original spirit of the length constraint and
+    # avoids scanning a multi-billion-record streaming corpus.
+    if len(pos_candidates) < n_total:
+        import hashlib as _hl
+        _needed = n_total - len(pos_candidates)
+        print(f"  Second pass for {_needed} more depression positives (window 180-520) ...")
+        _seen = {_hl.md5(t.encode()).hexdigest() for _, t in pos_candidates}
+        # Re-load mrjunos (already cached locally after first pass)
+        ds_pass2 = load_dataset("csv", data_files=pos_url, split="train")
+        extras: list[tuple[int, str]] = []
+        for ex in ds_pass2:
+            text = clean_text(_pick_text_field(ex))
+            if not text:
+                continue
+            n_tok = token_count(text, tok)
+            if not (180 <= n_tok <= 520):
+                continue
+            if n_tok in range(200, 501):
+                continue  # already captured in first pass
+            raw_label = ex.get("labels", ex.get("label"))
+            if raw_label is None:
+                continue
+            if not filter_depression_positive_label(str(raw_label).strip().lower()):
+                continue
+            h = _hl.md5(text.encode()).hexdigest()
+            if h in _seen:
+                continue
+            _seen.add(h)
+            extras.append((n_tok, text))
+        extras.sort(key=lambda item: item[0], reverse=True)
+        pos_candidates.extend(extras[:_needed])
+
+    pos_candidates.sort(key=lambda item: item[0], reverse=True)
+    pos = [text for _, text in pos_candidates[:n_total]]
+    p_dom = ["social"] * len(pos)
+
+    target = n_total
+    if len(pos) == 0:
+        raise ValueError("depression: no positive examples found within the 200-500 token window")
+
+    print("  Loading dlb/mentalreddit for depression negatives ...")
+    ds_neg = load_dataset("dlb/mentalreddit", split="train", streaming=True)
+    allowed_general_subs = {
+        "askreddit", "askscience", "casualconversation", "daddit", "explainlikeimfive",
+        "legaladvice", "movies", "news", "nostupidquestions", "personalfinance",
+        "politics", "showerthoughts", "technology", "todayilearned", "worldnews",
+    }
+    excluded_substrs = {
+        "depress", "mental", "anxiet", "suicid", "therapy", "bipolar", "ptsd",
+        "selfharm", "self-harm", "ocd", "adhd", "autism", "schiz", "eating",
+        "recovery", "addict",
+    }
+
+    neg_candidates: list[tuple[int, str]] = []
+    neg_cap = max(target * 3, 1200)
+    for ex in ds_neg:
+        subreddit = str(ex.get("subreddit", "")).strip().lower()
+        if subreddit in allowed_general_subs:
+            pass
+        elif any(mark in subreddit for mark in excluded_substrs):
+            continue
+
+        text = clean_text(_pick_text_field(ex))
+        if not text or not filter_depression_negative_general_text(text):
+            continue
+        n_tok = token_count(text, tok)
+        if not (200 <= n_tok <= 500):
+            continue
+        neg_candidates.append((n_tok, text))
+        if len(neg_candidates) >= neg_cap:
             break
-    # Fallback: keyword filter if control subs thin
-    if len(neg) < n_total:
-        _DEP_KW = {"depress", "suicid", "anxiet", "mental health", "therapy", "self-harm"}
-        ds_mh2 = load_dataset("solomonk/reddit_mental_health_posts", split="train", streaming=True)
-        for ex in ds_mh2:
-            text = clean_text(ex.get("body", "") or ex.get("title", ""))
-            if not is_valid_length(text, tok): continue
-            lower = text.lower()
-            if not any(kw in lower for kw in _DEP_KW) and len(neg) < n_total:
-                neg.append(text); n_dom.append("social_mh")
-            if len(neg) >= n_total: break
 
-    # Source 2: sentence-transformers/reddit (general Reddit text-filtered)
-    rp, rpd = _stream_independent("sentence-transformers/reddit", None, "body", "social",
-                                   filter_depression_positive_text, n_sec, tok)
-    rn, rnd = _stream_independent("sentence-transformers/reddit", None, "body", "social",
-                                   filter_depression_negative_text, n_sec, tok)
-    pos += rp; p_dom += rpd; neg += rn; n_dom += rnd
+    if len(neg_candidates) < target:
+        raise ValueError(
+            f"depression: only {len(neg_candidates)} negative candidates found, "
+            f"need at least {target} to match the positive pool"
+        )
 
-    # Source 3: CC-News (news coverage of mental health)
-    np_, npd = _stream_independent("cc_news", None, "text", "news",
-                                    filter_depression_positive_text, n_sec, tok,
-                                    chunk_long_docs=True)
-    nn, nnd = _stream_independent("cc_news", None, "text", "news",
-                                   filter_depression_negative_text, n_sec, tok,
-                                   chunk_long_docs=True)
-    pos += np_; p_dom += npd; neg += nn; n_dom += nnd
+    neg_candidates.sort(key=lambda item: item[0], reverse=True)
+    neg = [text for _, text in neg_candidates[:target]]
+    n_dom = ["social"] * len(neg)
+
+    # Deduplicate before handing the corpus to the generic splitter so the
+    # depression split ratio is computed on the true post-clean candidate pool.
+    import hashlib
+
+    def _dedup_pairs(pairs: list[tuple[int, str]]) -> list[tuple[int, str]]:
+        seen: set[str] = set()
+        out: list[tuple[int, str]] = []
+        for score, text in pairs:
+            h = hashlib.md5(text.encode()).hexdigest()
+            if h in seen:
+                continue
+            seen.add(h)
+            out.append((score, text))
+        return out
+
+    pos_candidates = _dedup_pairs(pos_candidates)
+    neg_candidates = _dedup_pairs(neg_candidates)
+    pos_hashes = {hashlib.md5(text.encode()).hexdigest() for _, text in pos_candidates}
+    neg_candidates = [
+        (score, text)
+        for score, text in neg_candidates
+        if hashlib.md5(text.encode()).hexdigest() not in pos_hashes
+    ]
+    pos = [text for _, text in pos_candidates]
+    neg = [text for _, text in neg_candidates[:target]]
+    p_dom = ["social"] * len(pos)
+    n_dom = ["social"] * len(neg)
+
+    print(
+        f"  Depression candidates after label + length filtering: "
+        f"{len(pos)} pos / {len(neg)} neg"
+    )
 
     return pos, neg, p_dom, n_dom, None
 
@@ -1090,89 +1209,216 @@ def build_bureaucratic(n_total: int):
     return pos, neg, p_dom, n_dom, None
 
 
-def build_uncertainty(n_total: int):
+def build_narrative(n_total: int):
     """
-    3 domains: academic (ArXiv), news (CC-News), social (Reddit).
-    Independent samples.
+    fiction vs factual prose — 3 domains.
+    Positives: euclaise/writingprompts story field (fiction domain).
+    Negatives: wikimedia/wikipedia (encyclopaedia domain) + CC-News (news) to fill shortfall.
+    Wikipedia articles about fictional works are excluded via filter_narrative_negative.
     """
+    from datasets import load_dataset
     tok = get_tokenizer()
-    n_sec = n_total // 3
 
-    pos, neg, p_dom, n_dom = [], [], [], []
+    pos, p_dom = [], []
+    neg, n_dom = [], []
+    n_half = (n_total + 1) // 2
 
-    for ds_name, config, field, domain, n_target, chunk in [
-        ("gfissore/arxiv-abstracts-2021", None, "abstract", "academic", n_total, False),
-        ("cc_news",                        None, "text",     "news",     n_sec,   True),
-        ("sentence-transformers/reddit",   None, "body",     "social",   n_sec,   False),
-    ]:
-        p, pd_ = _stream_independent(ds_name, config, field, domain,
-                                      filter_uncertainty_positive, n_target, tok, chunk)
-        n, nd_ = _stream_independent(ds_name, config, field, domain,
-                                      filter_uncertainty_negative, n_target, tok, chunk)
-        pos += p; p_dom += pd_; neg += n; n_dom += nd_
+    # ── Positives: WritingPrompts stories ────────────────────────────────────
+    print("  Loading euclaise/writingprompts for narrative positives (source 1/1) ...")
+    ds_wp = load_dataset("euclaise/writingprompts", split="train", streaming=True)
+    for ex in ds_wp:
+        if len(pos) >= n_total:
+            break
+        story = clean_text(ex.get("story", "") or "")
+        if not story:
+            continue
+        # Chunk if the story is very long; keep chunks that hit the token window
+        candidates = _chunk_tokens(story, tok)
+        for chunk in candidates:
+            if not is_valid_length(chunk, tok):
+                continue
+            if filter_narrative_positive(chunk):
+                pos.append(chunk)
+                p_dom.append("fiction")
+            if len(pos) >= n_total:
+                break
+
+    # ── Negatives: Wikipedia (encyclopaedia) ─────────────────────────────────
+    print("  Loading wikimedia/wikipedia for narrative negatives (source 1/2) ...")
+    n1, nd1 = _stream_independent(
+        "wikimedia/wikipedia", "20231101.en", "text", "encyclopaedia",
+        filter_narrative_negative, n_half, tok, chunk_long_docs=True,
+    )
+    neg += n1; n_dom += nd1
+
+    # ── Negatives: CC-News (news) — fills any shortfall ──────────────────────
+    if len(neg) < n_total:
+        print("  Loading cc_news for narrative negatives (source 2/2) ...")
+        n2, nd2 = _stream_independent(
+            "cc_news", None, "text", "news",
+            filter_narrative_negative, n_total - len(neg), tok,
+            chunk_long_docs=True,
+        )
+        neg += n2; n_dom += nd2
 
     return pos, neg, p_dom, n_dom, None
 
 
 def build_deference(n_total: int):
     """
-    3 domains: academic (ArXiv), news (CC-News), legal (SCOTUS).
-    Deference markers ("previous work", "as shown by", "it has been established")
-    appear in academic citations AND legal opinions citing prior cases.
-    Reddit excluded: casual posts rarely contain academic attribution phrases.
-    Independent samples.
+    Two-source corpus for domain diversity.
+    Source 1: Intel/polite-guard — customer-service sentence-level politeness
+              (positive = polite + somewhat polite; negative = neutral + impolite).
+    Source 2: allenai/scicite — citation intent labels;
+              background = deferring to prior authority (positive),
+              result = asserting own findings (negative).
+    Uses a relaxed token window (8-128) because both sources are sentence-level.
     """
-    from poolbench.filters import filter_deference_positive, filter_deference_negative
+    from datasets import load_dataset
     tok = get_tokenizer()
-    n_sec = n_total // 3
+    tok_min, tok_max = CONCEPTS["deference"].get("token_range", [8, 128])
 
-    pos, neg, p_dom, n_dom = [], [], [], []
+    # Source 1: Intel/polite-guard (customer_service domain)
+    pos, p_dom = _collect_top_token_examples(
+        "Intel/polite-guard",
+        {"polite", "somewhat polite"},
+        n_total,
+        tok,
+        domain="customer_service",
+        min_tokens=tok_min,
+        max_tokens=tok_max,
+    )
+    neg, n_dom = _collect_top_token_examples(
+        "Intel/polite-guard",
+        {"neutral", "impolite"},
+        n_total,
+        tok,
+        domain="customer_service",
+        min_tokens=tok_min,
+        max_tokens=tok_max,
+    )
 
-    for ds_name, config, field, domain, n_target, chunk in [
-        ("gfissore/arxiv-abstracts-2021", None, "abstract", "academic", n_total, False),
-        ("cc_news",                        None, "text",     "news",     n_sec,   True),
-        ("lex_glue",                        "scotus", "text", "legal",   n_sec,   True),
-    ]:
-        p, pd_ = _stream_independent(ds_name, config, field, domain,
-                                      filter_deference_positive, n_target, tok, chunk)
-        n, nd_ = _stream_independent(ds_name, config, field, domain,
-                                      filter_deference_negative, n_target, tok, chunk)
-        pos += p; p_dom += pd_; neg += n; n_dom += nd_
+    # Source 2: academic-domain deference signal
+    # Try allenai/scicite first (background=deferring, result=asserting).
+    # HuggingFace deprecated custom dataset scripts, so fall back to streaming
+    # sentence-transformers/reddit filtered by text markers when scicite fails.
+    print("  Loading academic source for deference (academic_citation domain) ...")
+    from poolbench.data.filters import filter_deference_positive as _fdp, filter_deference_negative as _fdn
+    sci_pos_cands: list[tuple[int, str]] = []
+    sci_neg_cands: list[tuple[int, str]] = []
+    _sci_loaded = False
+    try:
+        ds_sci = load_dataset("allenai/scicite", split="train", trust_remote_code=True)
+        sci_label_names = getattr(ds_sci.features.get("label"), "names", None)
+        for ex in ds_sci:
+            text = (ex.get("string") or "").strip()
+            if not text:
+                continue
+            n_tok = token_count(text, tok)
+            if not (tok_min <= n_tok <= tok_max):
+                continue
+            lname = _label_name(ex, sci_label_names)
+            if lname == "background":
+                sci_pos_cands.append((n_tok, text))
+            elif lname == "result":
+                sci_neg_cands.append((n_tok, text))
+        _sci_loaded = bool(sci_pos_cands)
+    except Exception as e:
+        print(f"  [WARN] allenai/scicite unavailable ({e}). Falling back to Reddit academic text.")
+
+    if not _sci_loaded:
+        # Fallback: stream Reddit and keep posts that contain academic citation
+        # language ("previous work", "building on", "we show", etc.).
+        # r/AskScience, r/MachineLearning, r/science naturally produce these.
+        print("  Loading sentence-transformers/reddit for deference academic fallback ...")
+        ds_reddit_sci = load_dataset("sentence-transformers/reddit", split="train", streaming=True)
+        _cap = n_total * 5
+        _scanned = 0
+        for ex in ds_reddit_sci:
+            text = clean_text(ex.get("body", ex.get("text", "")) or "")
+            if not text:
+                _scanned += 1
+                if _scanned > _cap:
+                    break
+                continue
+            n_tok = token_count(text, tok)
+            if not (tok_min <= n_tok <= tok_max):
+                _scanned += 1
+                if _scanned > _cap:
+                    break
+                continue
+            if _fdp(text):
+                sci_pos_cands.append((n_tok, text))
+            elif _fdn(text):
+                sci_neg_cands.append((n_tok, text))
+            _scanned += 1
+            if len(sci_pos_cands) >= n_total and len(sci_neg_cands) >= n_total:
+                break
+            if _scanned > _cap:
+                break
+
+    sci_pos_cands.sort(key=lambda x: x[0], reverse=True)
+    sci_neg_cands.sort(key=lambda x: x[0], reverse=True)
+    _dom2 = "academic_citation" if _sci_loaded else "social_academic"
+    if sci_pos_cands:
+        pos += [t for _, t in sci_pos_cands[:n_total]]
+        p_dom += [_dom2] * len(sci_pos_cands[:n_total])
+    if sci_neg_cands:
+        neg += [t for _, t in sci_neg_cands[:n_total]]
+        n_dom += [_dom2] * len(sci_neg_cands[:n_total])
 
     return pos, neg, p_dom, n_dom, None
 
 
 def build_planning(n_total: int):
     """
-    3 domains: academic (ArXiv), news (CC-News), social (Reddit).
-    Positives: texts with ≥1 forward-planning marker ("future work", "we will",
-      "we plan to", "next steps", etc.). With ≥1 threshold, CC-News and Reddit
-      yield planning language (business goals, political plans, personal plans).
-    Negatives: ArXiv only — anti-planning markers ("we show", "we present") are
-      academic phrases; news/Reddit would require multi-million scans for negatives.
-    Independent samples.
+    Positives: WikiHow `title`+`text` concatenation — naturally planning/goal-directed.
+    Negatives: Reddit (social) + CC-News (news) chunks with planning markers absent.
+    Yelp is intentionally excluded — its short reviews rarely pass the 300-token floor.
     """
-    from poolbench.filters import filter_planning_positive, filter_planning_negative
+    from poolbench.filters import filter_planning_negative
+    from datasets import load_dataset
     tok = get_tokenizer()
-    n_sec = n_total // 3
 
     pos, neg, p_dom, n_dom = [], [], [], []
+    n_half = (n_total + 1) // 2
 
-    # Positives: academic (ArXiv) + news (CC-News) only.
-    # Reddit removed: _PLANNING_POS_MARKERS like "we will" and "next steps" are
-    # too generic and match crisis posts, relationship posts, etc.
-    for ds_name, config, field, domain, n_target, chunk in [
-        ("gfissore/arxiv-abstracts-2021", None, "abstract", "academic", n_total, False),
-        ("cc_news",                        None, "text",     "news",     n_sec,   True),
-    ]:
-        p, pd_ = _stream_independent(ds_name, config, field, domain,
-                                      filter_planning_positive, n_target, tok, chunk)
-        pos += p; p_dom += pd_
+    # ── Positives: WikiHow (concatenate title + steps text) ──────────────────
+    print("  Loading wikihow/wikihow for planning positives (source 1/1) ...")
+    try:
+        ds_wikihow = load_dataset("wikihow/wikihow", "all", split="train", streaming=True, trust_remote_code=True)
+        title_field, body_field = "title", "text"
+    except Exception:
+        ds_wikihow = load_dataset("gursi26/wikihow-cleaned", split="train", streaming=True)
+        title_field, body_field = "title", "text"
 
-    # Negatives: ArXiv only (anti-planning markers are academic phrases)
-    n, nd_ = _stream_independent("gfissore/arxiv-abstracts-2021", None, "abstract",
-                                  "academic", filter_planning_negative, n_total, tok)
-    neg += n; n_dom += nd_
+    for ex in ds_wikihow:
+        title = clean_text(ex.get(title_field, "") or "")
+        body  = clean_text(ex.get(body_field,  ex.get("summary", "")) or "")
+        text  = (title + " " + body).strip() if title else body
+        if not text or not is_valid_length(text, tok):
+            continue
+        pos.append(text); p_dom.append("howto")
+        if len(pos) >= n_total:
+            break
+
+    # ── Negatives: Reddit (social) ───────────────────────────────────────────
+    print("  Loading sentence-transformers/reddit for planning negatives (source 1/2) ...")
+    n1, nd1 = _stream_independent(
+        "sentence-transformers/reddit", None, "body", "social",
+        filter_planning_negative, n_half, tok,
+    )
+    neg += n1; n_dom += nd1
+
+    # ── Negatives: CC-News (news) — fills any shortfall ──────────────────────
+    if len(neg) < n_total:
+        print("  Loading cc_news for planning negatives (source 2/2) ...")
+        n2, nd2 = _stream_independent(
+            "cc_news", None, "text", "news",
+            filter_planning_negative, n_total - len(neg), tok,
+            chunk_long_docs=True,
+        )
+        neg += n2; n_dom += nd2
 
     return pos, neg, p_dom, n_dom, None
 
@@ -1283,9 +1529,8 @@ def build_numerical_precision(n_total: int):
 CONCEPT_BUILDERS = {
     "hedging":             build_hedging,
     "legal_formality":     build_legal_formality,
-    "math_certainty":      build_math_certainty,
     "frustration":         build_frustration,
-    "pos_sentiment":       build_pos_sentiment,
+    "imdb_sentiment":      build_imdb_sentiment,
     "toxicity":            build_toxicity,
     "depression":          build_depression,
     "causation":           build_causation,
@@ -1294,7 +1539,7 @@ CONCEPT_BUILDERS = {
     "academic_tone":       build_academic_tone,
     "code_docs":           build_code_docs,
     "bureaucratic":        build_bureaucratic,
-    "uncertainty":         build_uncertainty,
+    "narrative":           build_narrative,
     "deference":           build_deference,
     "planning":            build_planning,
     "negation_density":    build_negation_density,
@@ -1369,8 +1614,9 @@ def validate_corpus(concept: str, corpora_dir: Path) -> bool:
 
         # Domain diversity (warn only)
         domains = set(r.get("domain", "other") for r in pos_recs + neg_recs)
-        if len(domains) < 3:
-            print(f"  [WARN] {concept}/{split}: only {len(domains)} domain(s) covered (target ≥ 3)")
+        min_domains = meta.get("min_domains", 3)
+        if len(domains) < min_domains:
+            print(f"  [WARN] {concept}/{split}: only {len(domains)} domain(s) covered (target ≥ {min_domains})")
 
     if ok:
         print(f"  [OK] {concept}: all hard checks passed")
@@ -1432,14 +1678,26 @@ def main():
             traceback.print_exc()
             continue
 
+        if concept == "depression":
+            available = min(len(pos), len(neg))
+            n_train = (available * 7) // 10
+            n_test = available - n_train
+            print(
+                f"  [depression split] using {available} examples per class "
+                f"({n_train} train / {n_test} test, ~70/30)"
+            )
+        else:
+            n_train = args.n_train
+            n_test = args.n_test
+
         split_and_save(
             concept=concept,
             pos_passages=pos,
             neg_passages=neg,
             pos_domain=pos_domain,
             neg_domain=neg_domain,
-            n_train=args.n_train,
-            n_test=args.n_test,
+            n_train=n_train,
+            n_test=n_test,
             corpora_dir=args.corpora_dir,
             dry_run=args.dry_run,
             matched_pair_ids=pair_ids,

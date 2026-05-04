@@ -1,6 +1,6 @@
 # PoolBench
 
-**PoolBench** is a diagnostic benchmark that systematically evaluates 19 pooling strategies across 7 large language models and 18 semantic concepts, measuring how well each strategy captures concept-level information in hidden representations.
+**PoolBench** is a diagnostic benchmark that systematically evaluates 19 pooling strategies across 7 large language models and 17 semantic concepts, measuring how well each strategy captures concept-level information in hidden representations.
 
 ---
 
@@ -9,7 +9,7 @@
 Every embedding pipeline makes an implicit choice: which token(s) to pool when converting a sequence of hidden states into a single vector. The last token? Mean pooling? Attention-weighted? This choice is rarely studied systematically. PoolBench provides:
 
 - **19 ranked pooling strategies** spanning position-anchored, uniform aggregation, window, saliency-weighted, and structural-linguistic families (18 unsupervised + 1 supervised)
-- **18 semantic concepts** (hedging, causation, sentiment, toxicity, legal formality, math certainty, and 12 more) with controlled positive/negative corpora
+- **17 semantic concepts** (hedging, causation, sentiment, toxicity, legal formality, math certainty, and 12 more) with controlled positive/negative corpora
 - **3 evaluation metrics**: D1 AUROC (concept separability), D2 SCP (structural consistency probe), D3 Disentanglement
 - **7 models**: Llama-3.1 8B, Gemma-2 9B, Mistral 7B, Qwen-2.5 7B, FLAN-T5 XL, Mamba2 2.7B, BERT-base
 
@@ -190,11 +190,10 @@ S = supervised (requires labeled corpus at pooling time); U = unsupervised.
 |---|---|---|---|
 | `hedging` | gfissore/arxiv-abstracts-2021 | Same (hedge removed) | Rule-based rewrite |
 | `legal_formality` | lex\_glue/scotus | Same (legal markers removed) | Rule-based rewrite |
-| `math_certainty` | EleutherAI/hendrycks\_math | Same (problem stmt) | Natural parallel |
 | `frustration` | go\_emotions | go\_emotions | Label filter |
-| `pos_sentiment` | sst2 | sst2 | Label filter |
+| `imdb_sentiment` | yin001/imdb_dataset_positive_negative | yin001/imdb_dataset_positive_negative | Label filter |
 | `toxicity` | SetFit/toxic\_conversations | SetFit/toxic\_conversations | Label filter |
-| `depression` | solomonk/reddit\_mental\_health\_posts | solomonk/reddit\_mental\_health\_posts | Label filter |
+| `depression` | mrjunos/depression\_reddit\_cleaned + dlb/mentalreddit | mrjunos/depression\_reddit\_cleaned + dlb/mentalreddit | Hybrid Reddit split |
 | `causation` | gfissore/arxiv-abstracts-2021 | Same (causal connector removed) | Rule-based rewrite |
 | `contrast` | nyu-mll/multi\_nli (contradiction) | nyu-mll/multi\_nli (entailment) | Label filter |
 | `conditionality` | nyu-mll/multi\_nli (if/when/unless) | nyu-mll/multi\_nli (no conditionals) | Regex filter |
@@ -202,8 +201,8 @@ S = supervised (requires labeled corpus at pooling time); U = unsupervised.
 | `code_docs` | Nan-Do/code-search-net-python | sentence-transformers/reddit | Domain filter |
 | `bureaucratic` | FiscalNote/billsum | Yelp/yelp\_review\_full | Domain filter |
 | `uncertainty` | gfissore/arxiv-abstracts-2021 | gfissore/arxiv-abstracts-2021 | Lexical filter |
-| `deference` | gfissore/arxiv-abstracts-2021 | gfissore/arxiv-abstracts-2021 | Regex filter |
-| `planning` | tasksource/bigbench (goal\_step\_wikihow) | tasksource/bigbench | Label filter |
+| `deference` | Intel/polite-guard | `Intel/polite-guard` | Label filter (`polite` + `somewhat polite` vs. `neutral` + `impolite`) |
+| `planning` | gursi26/wikihow-cleaned + sentence-transformers/reddit + Yelp/yelp_review_full | gursi26/wikihow-cleaned + sentence-transformers/reddit + Yelp/yelp_review_full | Text/source filter |
 | `negation_density` | gfissore/arxiv-abstracts-2021 | gfissore/arxiv-abstracts-2021 | Lexical filter |
 | `numerical_precision` | gfissore/arxiv-abstracts-2021 | cc\_news | Lexical filter |
 
