@@ -234,6 +234,13 @@ def main() -> None:
     device = args.device
     if device == "auto":
         device = find_free_gpu(min_free_gb=args.min_free_gb, logger=log)
+        if device == "cpu":
+            raise RuntimeError(
+                "CUDA is not available in this Python environment. Refusing to run an 8B model on CPU. "
+                "Install a PyTorch wheel compatible with the cluster CUDA driver, then rerun."
+            )
+    elif device == "cpu" and args.model not in {"bert_base_uncased"}:
+        raise RuntimeError("Refusing to run a large PoolBench model on CPU; choose a CUDA device.")
     run_low_disk(args.model, device, skip_scp=args.skip_scp, force=args.force)
 
 
