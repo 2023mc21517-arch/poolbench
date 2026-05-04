@@ -135,6 +135,24 @@ log = get_logger(
 )
 
 
+def _safe_load_json(path: Path) -> dict | None:
+    """Load JSON checkpoint if it exists and is readable."""
+    if not path.exists():
+        return None
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+    except Exception as exc:
+        log.warning(f"  [checkpoint] Could not read {path}: {exc} — recomputing")
+        return None
+
+
+def _missing_keys(data: dict, required_keys: list[str]) -> list[str]:
+    """Return required keys absent from a checkpoint dictionary."""
+    return [k for k in required_keys if k not in data]
+
+
 # ── Step 1: Extract activations ───────────────────────────────────────────────
 
 def step_extract(model_name: str, device: str, skip_existing: bool = True,
@@ -171,12 +189,41 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
     log.info(f"\n=== Step 2: Pool + AUROC — {model_name} ===  GPU: {gpu_mem_str()}")
     concepts_to_run = {k: v for k, v in CONCEPTS.items()
                        if concept_filter is None or k == concept_filter}
+    expected_keys = [f"{concept}_{strategy}" for concept in concepts_to_run for strategy in RANKED_STRATEGIES]
+
+    primary_out = AUROC_DIR / model_name / "best_layer_auroc.json"
+    existing_summary = _safe_load_json(primary_out)
+    if existing_summary is not None:
+        per_layer_existing = existing_summary.get("per_layer", {})
+        layers_complete = True
+        for layer_idx in cfg["candidate_layers"]:
+            layer_res = per_layer_existing.get(str(layer_idx), {})
+            if _missing_keys(layer_res, expected_keys):
+                layers_complete = False
+                break
+        if layers_complete:
+            log.info(f"  [checkpoint] Step 2 already complete → {primary_out}; skipping")
+            return {
+                "best_layer": existing_summary.get("best_layer"),
+                "per_layer": {int(k): v for k, v in per_layer_existing.items()},
+            }
 
     per_layer_results: dict[int, dict] = {}
 
     for layer_idx in cfg["candidate_layers"]:
         log.info(f"\n  Layer {layer_idx}  GPU: {gpu_mem_str()}")
         layer_act_dir = ACT_DIR / model_name / f"layer_{layer_idx}"
+        layer_auroc_dir = AUROC_DIR / model_name / f"layer_{layer_idx}"
+        layer_out_path = layer_auroc_dir / f"{model_name}_auroc_results.json"
+
+        existing_layer = _safe_load_json(layer_out_path)
+        if existing_layer is not None:
+            missing = _missing_keys(existing_layer, expected_keys)
+            if not missing:
+                log.info(f"  [checkpoint] Step 2 layer {layer_idx} already complete → {layer_out_path}; skipping")
+                per_layer_results[layer_idx] = existing_layer
+                continue
+            log.info(f"  [checkpoint] Step 2 layer {layer_idx} missing {len(missing)} AUROC cells — recomputing layer")
 
         # Build pooled_results: {concept_strategy: {pos_pooled, neg_pooled}}
         pooled_results: dict = {}
@@ -195,7 +242,6 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
             )
             pooled_results.update(layer_pooled)
 
-        layer_auroc_dir = AUROC_DIR / model_name / f"layer_{layer_idx}"
         auroc_res = compute_all_auroc(
             pooled_results       = pooled_results,
             model_name           = model_name,
@@ -209,7 +255,6 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
     log.info(f"\n  Best layer (modal): {best_layer}")
 
     # Save the best-layer results as the primary leaderboard input
-    primary_out = AUROC_DIR / model_name / "best_layer_auroc.json"
     primary_out.parent.mkdir(parents=True, exist_ok=True)
     with open(primary_out, "w") as f:
         json.dump({
@@ -258,9 +303,20 @@ def step_linearity(model_name: str, best_layer: int,
     log.info(f"\n=== Step 3: Linearity check — {model_name} L{best_layer} ===  GPU: {gpu_mem_str()}")
     LINEARITY_DIR.mkdir(parents=True, exist_ok=True)
     concepts_to_run = CONCEPT_NAMES if concept_filter is None else [concept_filter]
+    out_path = LINEARITY_DIR / f"{model_name}_linearity.json"
+    existing = _safe_load_json(out_path)
+    if existing is not None:
+        missing = _missing_keys(existing, concepts_to_run)
+        if not missing:
+            log.info(f"  [checkpoint] Step 3 already complete → {out_path}; skipping")
+            return
+        log.info(f"  [checkpoint] Step 3 missing {len(missing)} concept(s) — resuming")
 
-    linearity_results = {}
+    linearity_results = existing or {}
     for concept_name in concepts_to_run:
+        if concept_name in linearity_results:
+            log.info(f"  [checkpoint] Step 3 {concept_name} already done — skipping")
+            continue
         pos_acts = load_activations(ACT_DIR, model_name, best_layer, concept_name, "pos")
         neg_acts = load_activations(ACT_DIR, model_name, best_layer, concept_name, "neg")
         if pos_acts is None or neg_acts is None:
@@ -272,11 +328,12 @@ def step_linearity(model_name: str, best_layer: int,
         result = check_linearity_assumption(pos_pooled, neg_pooled, concept_name,
                                              construction_method)
         linearity_results[concept_name] = result
+        with open(out_path, "w") as f:
+            json.dump(linearity_results, f, indent=2)
         status = "✓" if result["passes"] else "✗ FAIL"
         log.info(f"  {status}  {concept_name}: linear={result['linear_auroc']:.3f} "
               f"mlp={result['mlp_auroc']:.3f} gap={result['gap']:.4f}")
 
-    out_path = LINEARITY_DIR / f"{model_name}_linearity.json"
     with open(out_path, "w") as f:
         json.dump(linearity_results, f, indent=2)
     log.info(f"  Saved → {out_path}")
@@ -297,6 +354,16 @@ def step_icc(model_name: str, construction_method: str = DEFAULT_CONSTRUCTION,
     """
     log.info(f"\n=== Step 4: ICC computation — {model_name} ===  GPU: {gpu_mem_str()}")
     ICC_DIR.mkdir(parents=True, exist_ok=True)
+    concepts_to_run = CONCEPT_NAMES if concept_filter is None else [concept_filter]
+    out_path = ICC_DIR / f"{model_name}_icc.json"
+    existing = _safe_load_json(out_path)
+    if existing is not None:
+        existing_concepts = existing.get("icc_per_concept", {})
+        if isinstance(existing_concepts, dict) and not _missing_keys(existing_concepts, concepts_to_run):
+            log.info(f"  [checkpoint] Step 4 already complete → {out_path}; skipping")
+            return
+        log.info("  [checkpoint] Step 4 ICC checkpoint incomplete — recomputing")
+
     best_layer_path = AUROC_DIR / model_name / "best_layer_auroc.json"
     if not best_layer_path.exists():
         log.warning(f"  [icc] {best_layer_path} not found — run step 2 first.")
@@ -305,7 +372,6 @@ def step_icc(model_name: str, construction_method: str = DEFAULT_CONSTRUCTION,
     with open(best_layer_path) as f:
         data = json.load(f)
 
-    concepts_to_run = CONCEPT_NAMES if concept_filter is None else [concept_filter]
     # Build per-concept list of AUROC from best strategy (A1_mean as reference strategy)
     per_layer = data.get("per_layer", {})
     layer_aurocs_per_concept: dict[str, list[float]] = {}
@@ -324,7 +390,6 @@ def step_icc(model_name: str, construction_method: str = DEFAULT_CONSTRUCTION,
     icc_res = compute_layer_icc(layer_aurocs_per_concept, n_base=n_base)
     icc_res["model_name"] = model_name
 
-    out_path = ICC_DIR / f"{model_name}_icc.json"
     with open(out_path, "w") as f:
         json.dump(icc_res, f, indent=2)
     log.info(f"  mean_icc={icc_res['mean_icc']:.3f}  N_eff={icc_res['N_eff']}")
@@ -400,13 +465,26 @@ def step_keyword_ablation(
         log.info("  No seeded concepts to ablate.")
         return
 
+    out_path = ABLATION_DIR / f"{model_name}_keyword_ablation.json"
+    required_concepts = [name for name, _ in seeded_concepts]
+    existing = _safe_load_json(out_path)
+    if existing is not None:
+        missing = _missing_keys(existing, required_concepts)
+        if not missing:
+            log.info(f"  [checkpoint] Step 4b already complete → {out_path}; skipping")
+            return
+        log.info(f"  [checkpoint] Step 4b missing {len(missing)} concept(s) — resuming")
+
     cfg = MODEL_CONFIGS[model_name]
     model, tokenizer = _load_model(model_name, cfg["hf_id"], device)
     log.info(f"  Model loaded for ablation  GPU: {gpu_mem_str(device)}")
 
-    results: dict = {}
+    results: dict = existing or {}
 
     for concept_name, concept_meta in seeded_concepts:
+        if concept_name in results:
+            log.info(f"  [checkpoint] Step 4b {concept_name} already done — skipping")
+            continue
         seed_words = concept_meta.get("seed_words", [])
         if not seed_words:
             continue
@@ -454,11 +532,12 @@ def step_keyword_ablation(
             concept_name=concept_name,
         )
         results[concept_name] = res
+        with open(out_path, "w") as f:
+            json.dump(results, f, indent=2)
         flag = "♦ SURFACE KEYWORD" if res["signal_in_surface"] else "✓"
         log.info(f"  {flag}  {concept_name}: full={res['full_auroc']:.3f} "
                  f"ablated={res['ablated_auroc']:.3f} drop={res['drop']:.4f}")
 
-    out_path = ABLATION_DIR / f"{model_name}_keyword_ablation.json"
     with open(out_path, "w") as f:
         json.dump(results, f, indent=2)
     log.info(f"  Ablation results saved → {out_path}")
