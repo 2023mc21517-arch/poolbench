@@ -42,7 +42,7 @@ from poolbench.extract_activations  import extract_activations_for_model, load_a
 
 MODEL_CONFIGS: dict[str, dict] = {
     "llama3_8b": {
-        "hf_id":            "meta-llama/Meta-Llama-3.1-8B",
+        "hf_id":            "NousResearch/Meta-Llama-3.1-8B",
         "d_model":          4096,
         "n_layers":         32,
         "candidate_layers": [16, 24, 31],  # early-mid | mid | final
