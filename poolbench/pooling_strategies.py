@@ -142,6 +142,24 @@ def pool_attention_weighted(h: np.ndarray, attn_weights: np.ndarray | None) -> n
     return (w[:, None] * h).sum(axis=0)
 
 
+def _attention_inflow_per_head(attn_weights: np.ndarray | None) -> np.ndarray | None:
+    """
+    Return per-head token inflow as (n_heads, seq_len).
+
+    New activation files store this compact form directly. Older files may store
+    full attention matrices as (n_heads, seq_len, seq_len); for those, average
+    over query positions to recover the same token-inflow representation.
+    """
+    if attn_weights is None:
+        return None
+    attn = np.asarray(attn_weights, dtype=np.float32)
+    if attn.ndim == 3:
+        return attn.mean(axis=1)
+    if attn.ndim == 2:
+        return attn
+    raise ValueError(f"Unsupported attention shape: {attn.shape}")
+
+
 def pool_SIF_adapted(h: np.ndarray, token_ids: list[int], unigram_probs: dict,
                      a: float = 1e-3) -> np.ndarray:
     """
@@ -179,17 +197,18 @@ def pool_attn_head_ITI_exact(h: np.ndarray, attn_weights_per_head: np.ndarray | 
     if concept_probe is None:
         raise RuntimeError("S3_ITI_exact requires a concept_probe with head_scores; refusing to fall back to mean pooling")
 
-    n_heads = attn_weights_per_head.shape[0]
+    token_inflow = _attention_inflow_per_head(attn_weights_per_head)
+    if token_inflow is None:
+        raise RuntimeError("S3_ITI_exact requires attention weights; refusing to fall back to mean pooling")
+    n_heads = token_inflow.shape[0]
 
     if hasattr(concept_probe, 'head_scores'):
         head_scores = concept_probe.head_scores          # (n_heads,) probe accuracies
     else:
         # Fallback: use variance proxy if no probe scores available
-        token_inflow_fb = attn_weights_per_head.mean(axis=1)   # (n_heads, seq_len)
-        head_scores = token_inflow_fb.var(axis=1)
+        head_scores = token_inflow.var(axis=1)
 
     top_heads     = np.argsort(head_scores)[-top_k_heads:]
-    token_inflow  = attn_weights_per_head.mean(axis=1)   # (n_heads, seq_len)
     token_weights = token_inflow[top_heads].mean(axis=0) # (seq_len,)
     token_weights = token_weights / (token_weights.sum() + 1e-9)
     return (token_weights[:, None] * h).sum(axis=0)
@@ -476,7 +495,10 @@ def build_iti_concept_probes(act_dir, concepts: dict,
         sample = next((x for x in list(pos_acts) + list(neg_acts) if x.get("attn_weights") is not None), None)
         if sample is None:
             continue
-        n_heads = sample["attn_weights"].shape[0]
+        sample_inflow = _attention_inflow_per_head(sample["attn_weights"])
+        if sample_inflow is None:
+            continue
+        n_heads = sample_inflow.shape[0]
         head_scores = np.zeros(n_heads, dtype=np.float32)
         y = np.array([1] * len(pos_acts) + [0] * len(neg_acts), dtype=np.int32)
         all_acts = list(pos_acts) + list(neg_acts)
@@ -488,7 +510,11 @@ def build_iti_concept_probes(act_dir, concepts: dict,
                 if attn is None:
                     feats.append(pool_mean(h))
                     continue
-                inflow = attn[head_idx].mean(axis=0)
+                inflows = _attention_inflow_per_head(attn)
+                if inflows is None:
+                    feats.append(pool_mean(h))
+                    continue
+                inflow = inflows[head_idx]
                 inflow = inflow / (inflow.sum() + 1e-9)
                 feats.append((inflow[:, None] * h).sum(axis=0))
             X = np.stack(feats).astype(np.float32)
@@ -519,12 +545,13 @@ def compute_all_pooling_strategies(act_dir, concepts: dict,
         "offset_mapping" — list of (char_start, char_end), length seq_len
         "text"           — original passage string (for L1–L5 spaCy)
         "token_ids"      — list of int HF token IDs (for L4/S2)
-        "attn_weights"   — (n_heads, seq_len, seq_len) or None
+        "attn_weights"   — (n_heads, seq_len) compact inflow, legacy
+                           (n_heads, seq_len, seq_len), or None
 
     Args:
         concept_probes: {concept_name: sklearn probe with .head_scores attr}
-                        Required for S3_ITI_exact; if None, S3_ITI_exact falls back
-                        to pool_mean. Load from results/iti_heads/{model}/ in run_model.py.
+                        Required for S3_ITI_exact; missing probes raise instead
+                        of silently falling back.
 
     Returns:
         {f"{concept}_{strategy_id}": {"pos_pooled": ndarray, "neg_pooled": ndarray}}
@@ -569,7 +596,7 @@ def compute_all_pooling_strategies(act_dir, concepts: dict,
                     offset_mapping = item.get("offset_mapping", [])
                     text           = item.get("text", "")
                     token_ids      = item.get("token_ids", [])
-                    attn           = item.get("attn_weights")   # (n_heads, L, L) or None
+                    attn           = item.get("attn_weights")   # (n_heads, L) compact inflow or legacy (n_heads, L, L)
                     try:
                         if _sid == "L1_POS_filtered":
                             vec = _fn(h, text, offset_mapping)
@@ -594,7 +621,10 @@ def compute_all_pooling_strategies(act_dir, concepts: dict,
                         elif _sid == "S1_attention_weighted":
                             if attn is None:
                                 raise RuntimeError(f"S1_attention_weighted/{concept_name} requires attention weights")
-                            token_inflow = attn.mean(axis=0).mean(axis=0)  # (seq_len,)
+                            inflows = _attention_inflow_per_head(attn)
+                            if inflows is None:
+                                raise RuntimeError(f"S1_attention_weighted/{concept_name} requires attention weights")
+                            token_inflow = inflows.mean(axis=0)  # (seq_len,)
                             vec = _fn(h, token_inflow)
                         elif _sid == "S2_SIF":
                             if not token_ids:
@@ -697,7 +727,7 @@ def compute_pooled_vectors(
         text   = item.get("text", "")
         offsets = item.get("offset_mapping", [])
         tids   = item.get("token_ids", [])
-        attn   = item.get("attn_weights")  # (n_heads, L, L) or None
+        attn   = item.get("attn_weights")  # (n_heads, L) compact inflow or legacy (n_heads, L, L)
 
         try:
             if strategy_id == "L1_POS_filtered":
@@ -715,7 +745,10 @@ def compute_pooled_vectors(
             elif strategy_id == "S1_attention_weighted":
                 if attn is None:
                     raise RuntimeError("S1_attention_weighted requires attention weights")
-                inflow = attn.mean(axis=0).mean(axis=0)
+                inflows = _attention_inflow_per_head(attn)
+                if inflows is None:
+                    raise RuntimeError("S1_attention_weighted requires attention weights")
+                inflow = inflows.mean(axis=0)
                 vec = pool_fn(h, inflow)
             elif strategy_id == "S2_SIF":
                 if not tids:

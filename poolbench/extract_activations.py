@@ -16,7 +16,9 @@ Each element in the saved object array is a dict:
   "offset_mapping"  — list of (char_start, char_end) int tuples
   "text"            — original passage string (for L1–L3 spaCy)
   "token_ids"       — list of int HF token IDs (for L4 / S3_SIF)
-  "attn_weights"    — (n_heads, seq_len, seq_len) float32, or None for Mamba2
+    "attn_weights"    — compact per-head token inflow (n_heads, seq_len) float16,
+                                             or None for Mamba2. Older files may contain full
+                                             (n_heads, seq_len, seq_len) matrices.
 
 Usage (called from run_model.py):
   from poolbench.extract_activations import extract_activations_for_model
@@ -256,9 +258,13 @@ def _extract_batch(
         attn = None
         if attn_batch is not None and not _is_ssm(model_name):
             if is_eo or is_ed:
-                attn = attn_batch[i, :, :seq_len, :seq_len].astype(np.float32)
+                attn_full = attn_batch[i, :, :seq_len, :seq_len]
             else:
-                attn = attn_batch[i, :, start_pos:, start_pos:].astype(np.float32)
+                attn_full = attn_batch[i, :, start_pos:, start_pos:]
+            # Store only per-head mean inflow per token. S1 and S3_ITI_exact use
+            # token inflow, not the full query×key attention matrix. This reduces
+            # Llama activation files by roughly 20 MB per 400-token passage.
+            attn = attn_full.mean(axis=1).astype(np.float16)  # (n_heads, seq_len)
 
         token_ids = enc["input_ids"][i].cpu().numpy()
         if is_eo or is_ed:
@@ -271,7 +277,7 @@ def _extract_batch(
             "offset_mapping": offsets,        # list of (start, end)
             "text":           text,
             "token_ids":      token_ids_clean,
-            "attn_weights":   attn,           # (n_heads, seq_len, seq_len) or None
+            "attn_weights":   attn,           # (n_heads, seq_len) compact inflow or None
         })
 
     return results
