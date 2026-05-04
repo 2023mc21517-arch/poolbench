@@ -241,6 +241,32 @@ def _compute_concept_scp(
 
     results: dict[str, dict] = {}
 
+    # ── Baseline: generate ONCE per concept (α=0, no steering) ───────────────
+    # Baseline is model-inherent (unsteered) — same 10 prompts regardless of strategy.
+    # Using a throw-away zero vector so we can reuse _generate_with_steering.
+    _dummy_sv = np.zeros(1, dtype=np.float32)   # shape doesn't matter at α=0
+    # Actually use a real steering vector from the first available strategy
+    # so the hook is registered but has zero effect (alpha=0.0 means no addition).
+    _first_sv: np.ndarray | None = None
+    for _sid in strategy_ids:
+        _sv = _compute_steering_vector(act_dir, model_name, layer_idx, concept_name, _sid)
+        if _sv is not None:
+            _first_sv = _sv
+            break
+
+    if _first_sv is None:
+        log.warning(f"    [scp] no steering vectors available for concept={concept_name} — skip")
+        return {}
+
+    log.info(f"      [baseline] Generating unsteered baseline for {concept_name}  GPU: {gpu_mem_str(device)}")
+    baseline_texts = _generate_with_steering(
+        model, tokenizer, model_name, layer_idx, _first_sv, 0.0, EVAL_PROMPTS, device,
+    )
+    baseline_scores = score_texts(baseline_texts, classifier, classifier_tok, device)
+    baseline_score  = float(np.mean(baseline_scores))
+    baseline_ppl    = _compute_perplexity(model, tokenizer, baseline_texts, device)
+    log.info(f"      [baseline] score={baseline_score:.4f}  ppl={baseline_ppl:.1f}")
+
     for strat_id in strategy_ids:
         sv = _compute_steering_vector(act_dir, model_name, layer_idx, concept_name, strat_id)
         if sv is None:
@@ -249,18 +275,8 @@ def _compute_concept_scp(
 
         log.info(f"      strategy {strat_id}  GPU: {gpu_mem_str(device)}")
 
-        # Baseline — no steering
-        baseline_texts = _generate_with_steering(
-            model, tokenizer, model_name, layer_idx,
-            sv, 0.0, EVAL_PROMPTS, device,
-        )
-        baseline_scores = score_texts(baseline_texts, classifier, classifier_tok, device)
-        baseline_score  = float(np.mean(baseline_scores))
-
-        # Baseline perplexity
-        baseline_ppl = _compute_perplexity(model, tokenizer, baseline_texts, device)
-
         per_alpha: dict[str, float] = {}
+        steered_texts_at_1: list[str] = []
         for alpha in SCP_ALPHAS:
             steered_texts  = _generate_with_steering(
                 model, tokenizer, model_name, layer_idx,
@@ -269,18 +285,15 @@ def _compute_concept_scp(
             steered_scores = score_texts(steered_texts, classifier, classifier_tok, device)
             delta_c        = float(np.mean(steered_scores)) - baseline_score
             per_alpha[str(alpha)] = round(delta_c, 5)
+            if alpha == 1.0:
+                steered_texts_at_1 = steered_texts
 
         # SCP primary metric at α=1.0
         scp_c = per_alpha.get("1.0", 0.0)
 
-        # Φ_c — fluency diagnostic at α=1.0
-        steered_texts_1 = _generate_with_steering(
-            model, tokenizer, model_name, layer_idx,
-            sv, 1.0, EVAL_PROMPTS, device,
-        )
-        steered_ppl_1 = _compute_perplexity(model, tokenizer, steered_texts_1, device)
-        baseline_len  = 1.0   # already normalised by token count inside _compute_perplexity
-        steered_len   = 1.0
+        # Φ_c — fluency diagnostic at α=1.0 (reuse already-generated texts)
+        steered_ppl_1 = _compute_perplexity(model, tokenizer, steered_texts_at_1, device) \
+                        if steered_texts_at_1 else baseline_ppl
         phi_c = (steered_ppl_1 / baseline_ppl) if baseline_ppl > 0 else 1.0
 
         # M_c — Spearman ρ(alphas, deltas)
@@ -335,20 +348,27 @@ def compute_scp_for_model(
     out_path = out_dir / f"{model_name}_scp.json"
 
     if skip_existing and out_path.exists():
-        log.info(f"  [scp] {model_name}: loading existing results from {out_path}")
         with open(out_path) as f:
-            return json.load(f)
-
-    log.info(f"\n  [scp] Starting D2 SCP for {model_name}  GPU: {gpu_mem_str(device)}")
+            existing = json.load(f)
+        missing = [c for c in concepts if c not in existing]
+        if not missing:
+            log.info(f"  [scp] {model_name}: all {len(concepts)} concepts already done → {out_path}")
+            return existing
+        log.info(f"  [scp] {model_name}: resuming — {len(missing)} concept(s) still missing: {missing}")
+        all_results: dict[str, dict] = existing  # keep completed concepts, continue from here
+    else:
+        all_results: dict[str, dict] = {}
 
     # ── Load LLM ─────────────────────────────────────────────────────────────
+    log.info(f"\n  [scp] Starting D2 SCP for {model_name}  GPU: {gpu_mem_str(device)}")
     from poolbench.extract_activations import load_model as _load_model  # noqa: PLC0415
     model, tokenizer = _load_model(model_name, hf_id, device)
     log.info(f"  [scp] {model_name} loaded  GPU: {gpu_mem_str(device)}")
 
-    all_results: dict[str, dict] = {}
-
     for concept_name in concepts:
+        if concept_name in all_results:
+            log.info(f"    [scp] concept={concept_name} already done — skipping")
+            continue
         log.info(f"\n    [scp] concept={concept_name}  GPU: {gpu_mem_str(device)}")
 
         # Load Classifier B for this concept

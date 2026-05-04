@@ -611,8 +611,8 @@ def run_model(model_name: str, args: argparse.Namespace) -> dict:
         step_keyword_ablation(model_name, best_layer, args.device, concept_filter)
 
         if not skip_scp:
-            # Step 5 — Train Classifier B (on CPU to save GPU VRAM for the next steps)
-            step_train_classifiers(device="cpu", force_retrain=False)
+            # Step 5 — Train Classifier B on GPU (BERT is small ~500 MB, releases before Step 6)
+            step_train_classifiers(device=args.device, force_retrain=False)
 
             # Step 6 — D2 SCP
             step_scp(model_name, best_layer, args.device, concept_filter)
