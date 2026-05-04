@@ -224,8 +224,7 @@ def _extract_batch(
                 _ = model(**enc, output_attentions=not _is_ssm(model_name))
     except Exception as exc:
         hook.remove()
-        log.error(f"  [extract] forward pass error (layer {layer_idx}): {exc}")
-        return []
+        raise RuntimeError(f"forward pass error during extraction (layer {layer_idx}): {exc}") from exc
 
     hook.remove()
 
@@ -233,7 +232,7 @@ def _extract_batch(
     attn_batch   = hook.attn     # (batch, n_heads, seq_len, seq_len) or None
 
     if hidden_batch is None:
-        return []
+        raise RuntimeError(f"Layer hook captured no hidden states for {model_name} layer {layer_idx}")
 
     results = []
     attention_mask = enc["attention_mask"].cpu().numpy()  # (batch, seq_len)
@@ -349,6 +348,11 @@ def extract_activations_for_model(
                         batch_texts = texts[batch_start: batch_start + batch_size]
                         items = _extract_batch(model, tokenizer, model_name,
                                                batch_texts, layer_idx, device)
+                        if len(items) != len(batch_texts):
+                            raise RuntimeError(
+                                f"Extraction returned {len(items)} items for batch of {len(batch_texts)} "
+                                f"({concept_name}/{partition}/{split} L{layer_idx})"
+                            )
                         all_items.extend(items)
 
                     arr = np.empty(len(all_items), dtype=object)
@@ -374,9 +378,6 @@ def load_activations(act_dir: str | Path, model_name: str,
     Returns np.ndarray of dicts, or None if file not found.
     """
     path = Path(act_dir) / model_name / f"layer_{layer_idx}" / f"{concept_name}_{partition}_{split}.npy"
-    if not path.exists() and partition == "train":
-        # Backward-compatible fallback for old test-only activation files.
-        path = Path(act_dir) / model_name / f"layer_{layer_idx}" / f"{concept_name}_{split}.npy"
     if not path.exists():
         return None
     return np.load(path, allow_pickle=True)

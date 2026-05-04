@@ -79,10 +79,10 @@ def _compute_steering_vector(
     pos_acts = load_activations(act_dir, model_name, layer_idx, concept_name, "pos", partition="train")
     neg_acts = load_activations(act_dir, model_name, layer_idx, concept_name, "neg", partition="train")
     if pos_acts is None or neg_acts is None:
-        return None
+        raise RuntimeError(f"[d3] missing train activations for {concept_name} L{layer_idx}")
 
     if strategy_id not in STRATEGY_REGISTRY:
-        return None
+        raise KeyError(f"Unknown pooling strategy for D3: {strategy_id}")
 
     try:
         pos_vecs = compute_pooled_vectors(pos_acts, strategy_id,
@@ -91,15 +91,17 @@ def _compute_steering_vector(
         neg_vecs = compute_pooled_vectors(neg_acts, strategy_id,
                           unigram_probs=unigram_probs,
                           concept_probe=concept_probe)
-    except Exception:
-        return None
+    except Exception as exc:
+        raise RuntimeError(f"[d3] pooling failed for {concept_name}/{strategy_id}: {exc}") from exc
 
     if len(pos_vecs) == 0 or len(neg_vecs) == 0:
-        return None
+        raise RuntimeError(f"[d3] empty pooled vectors for {concept_name}/{strategy_id}")
 
     sv   = pos_vecs.mean(0) - neg_vecs.mean(0)
     norm = np.linalg.norm(sv)
-    return (sv / norm).astype(np.float32) if norm > 1e-9 else None
+    if norm <= 1e-9:
+        raise RuntimeError(f"[d3] zero-norm steering vector for {concept_name}/{strategy_id}")
+    return (sv / norm).astype(np.float32)
 
 
 # ── Cosine similarity ─────────────────────────────────────────────────────────
@@ -200,8 +202,7 @@ def compute_disentanglement_for_model(
             log.info(f"    [d3] concept={concept_name} already done — skipping")
             continue
         if concept_name not in NEIGHBOUR_PAIRS:
-            log.warning(f"  [d3] No neighbour pair defined for '{concept_name}' — skipping")
-            continue
+            raise RuntimeError(f"[d3] No neighbour pair defined for '{concept_name}'")
 
         neighbours = NEIGHBOUR_PAIRS[concept_name]
         ld_concept  = neighbours["LD"]
@@ -226,11 +227,7 @@ def compute_disentanglement_for_model(
                 _first_sv = _sv
                 break
         if _first_sv is None:
-            log.warning(f"    [d3] no steering vectors for {concept_name} — skipping")
-            all_d3[concept_name] = {}
-            with open(out_path, "w") as f:
-                json.dump(all_d3, f, indent=2)
-            continue
+            raise RuntimeError(f"[d3] no steering vectors for {concept_name}")
 
         log.info(f"      [d3 baseline] Generating unsteered baseline for {concept_name}  GPU: {gpu_mem_str(device)}")
         baseline_texts = _generate_with_steering(
@@ -242,10 +239,7 @@ def compute_disentanglement_for_model(
             scp_strat = scp_results.get(concept_name, {}).get(strat_id, {})
             delta_a   = scp_strat.get("SCP_c", None)
             if delta_a is None:
-                log.warning(f"    [d3] No SCP_c for {concept_name}/{strat_id} — skipping D3_LD/LC")
-                concept_d3[strat_id] = {"D3_LD": None, "D3_LC": None,
-                                         "D3_rep_LD": None, "D3_rep_LC": None}
-                continue
+                raise RuntimeError(f"[d3] No SCP_c for {concept_name}/{strat_id}")
 
             # ── Compute steering vector for concept A ──
             sv_a = _compute_steering_vector(
@@ -254,9 +248,7 @@ def compute_disentanglement_for_model(
                 concept_probe=concept_probes.get(concept_name),
             )
             if sv_a is None:
-                concept_d3[strat_id] = {"D3_LD": None, "D3_LC": None,
-                                         "D3_rep_LD": None, "D3_rep_LC": None}
-                continue
+                raise RuntimeError(f"[d3] no steering vector for {concept_name}/{strat_id}")
 
             # ── Generate text steered toward concept A at α=1.0 ──
             steered_texts = _generate_with_steering(
@@ -268,7 +260,7 @@ def compute_disentanglement_for_model(
             # ── Score with LD / LC neighbour classifiers → Δ_B ──
             def _delta_b(clf, ctok, neighbour):
                 if clf is None:
-                    return None
+                    raise RuntimeError(f"[d3] missing scorer for neighbour concept={neighbour}")
                 s_base    = score_texts(baseline_texts, clf, ctok, device)
                 s_steered = score_texts(steered_texts,  clf, ctok, device)
                 return float(np.mean(s_steered)) - float(np.mean(s_base))
@@ -355,25 +347,40 @@ def _compute_rep_only(
 
     log.info(f"  [d3] Computing D3_rep (cosine only) for {model_name}")
     all_d3: dict[str, dict] = {}
+    from poolbench.concepts import CONCEPTS  # noqa: PLC0415
+    from poolbench.pooling_strategies import (  # noqa: PLC0415
+        build_unigram_probs_from_activations, build_iti_concept_probes,
+    )
+    layer_act_dir = Path(act_dir) / model_name / f"layer_{best_layer}"
+    artefact_concepts = sorted(set(concepts) | {v for c in concepts for v in NEIGHBOUR_PAIRS.get(c, {}).values()})
+    concepts_meta = {c: CONCEPTS[c] for c in artefact_concepts if c in CONCEPTS}
+    unigram_probs = build_unigram_probs_from_activations(layer_act_dir, concepts_meta, partition="train")
+    concept_probes = build_iti_concept_probes(layer_act_dir, concepts_meta, partition="train")
 
     for concept_name in concepts:
         if concept_name not in NEIGHBOUR_PAIRS:
-            continue
+            raise RuntimeError(f"[d3_rep] No neighbour pair defined for '{concept_name}'")
         neighbours = NEIGHBOUR_PAIRS[concept_name]
         ld_concept = neighbours["LD"]
         lc_concept = neighbours["LC"]
 
         concept_d3: dict[str, dict] = {}
         for strat_id in strategy_ids:
-            sv_a  = _compute_steering_vector(act_dir, model_name, best_layer, concept_name, strat_id)
-            sv_ld = _compute_steering_vector(act_dir, model_name, best_layer, ld_concept,   strat_id)
-            sv_lc = _compute_steering_vector(act_dir, model_name, best_layer, lc_concept,   strat_id)
+            sv_a  = _compute_steering_vector(act_dir, model_name, best_layer, concept_name, strat_id,
+                                             unigram_probs=unigram_probs,
+                                             concept_probe=concept_probes.get(concept_name))
+            sv_ld = _compute_steering_vector(act_dir, model_name, best_layer, ld_concept,   strat_id,
+                                             unigram_probs=unigram_probs,
+                                             concept_probe=concept_probes.get(ld_concept))
+            sv_lc = _compute_steering_vector(act_dir, model_name, best_layer, lc_concept,   strat_id,
+                                             unigram_probs=unigram_probs,
+                                             concept_probe=concept_probes.get(lc_concept))
 
             concept_d3[strat_id] = {
                 "D3_LD":     None,
                 "D3_LC":     None,
-                "D3_rep_LD": round(_cosine_sim(sv_a, sv_ld), 5) if (sv_a is not None and sv_ld is not None) else None,
-                "D3_rep_LC": round(_cosine_sim(sv_a, sv_lc), 5) if (sv_a is not None and sv_lc is not None) else None,
+                "D3_rep_LD": round(_cosine_sim(sv_a, sv_ld), 5),
+                "D3_rep_LC": round(_cosine_sim(sv_a, sv_lc), 5),
             }
         all_d3[concept_name] = concept_d3
 

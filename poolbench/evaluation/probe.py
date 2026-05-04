@@ -164,8 +164,7 @@ def compute_all_auroc(
         pos = data["pos_pooled"]
         neg = data["neg_pooled"]
         if len(pos) == 0 or len(neg) == 0:
-            log.warning(f"  [probe] {key}: empty activations — skipping")
-            continue
+            raise RuntimeError(f"[probe] {key}: empty activations")
         res = compute_auroc_for_strategy(
             pos, neg,
             construction_method=construction_method,
@@ -259,8 +258,7 @@ def compute_all_train_test_auroc(
         tr = train_pooled_results[key]
         te = test_pooled_results[key]
         if len(tr["pos_pooled"]) == 0 or len(tr["neg_pooled"]) == 0 or len(te["pos_pooled"]) == 0 or len(te["neg_pooled"]) == 0:
-            log.warning(f"  [probe] {key}: empty train/test activations — skipping")
-            continue
+            raise RuntimeError(f"[probe] {key}: empty train/test activations")
         res = compute_train_test_auroc_for_strategy(
             tr["pos_pooled"], tr["neg_pooled"], te["pos_pooled"], te["neg_pooled"],
             construction_method=construction_method,
@@ -341,7 +339,7 @@ def nemenyi_strategy_significance(auroc_matrix: np.ndarray,
     try:
         from scikit_posthocs import posthoc_nemenyi_friedman  # noqa: PLC0415
     except ImportError:
-        posthoc_nemenyi_friedman = None
+        raise RuntimeError("Nemenyi posthoc requires scikit-posthocs; install it before running Step 8")
 
     import pandas as pd  # noqa: PLC0415
 
@@ -394,14 +392,12 @@ def nemenyi_strategy_significance(auroc_matrix: np.ndarray,
     cd = float(q * np.sqrt(k * (k + 1) / (6 * N)))
 
     # Pairwise Nemenyi p-values
-    nemenyi_pvalues = np.ones((n_strats, n_strats), dtype=np.float64)
-    if posthoc_nemenyi_friedman is not None:
-        try:
-            df_mat = pd.DataFrame(mat_clean.T, columns=strategy_ids)
-            ph_result = posthoc_nemenyi_friedman(df_mat)
-            nemenyi_pvalues = ph_result.values.astype(np.float64)
-        except Exception as exc:
-            log.warning(f"  [nemenyi] posthoc fallback: {exc}")
+    try:
+        df_mat = pd.DataFrame(mat_clean.T, columns=strategy_ids)
+        ph_result = posthoc_nemenyi_friedman(df_mat)
+        nemenyi_pvalues = ph_result.values.astype(np.float64)
+    except Exception as exc:
+        raise RuntimeError(f"Nemenyi posthoc failed: {exc}") from exc
 
     significant_pairs = []
     for i in range(n_strats):
@@ -522,7 +518,7 @@ def check_linearity_assumption(
 # ── Layer ICC (selection correction for D1) ──────────────────────────────────
 
 def compute_layer_icc(layer_aurocs_per_concept: dict[str, list[float]],
-                      n_base: int = 300) -> dict[str, Any]:
+                      n_base: int | dict[str, int] = 300) -> dict[str, Any]:
     """
     Intraclass Correlation Coefficient across layers, used to apply the
     effective-N correction for multi-layer testing.
@@ -530,7 +526,8 @@ def compute_layer_icc(layer_aurocs_per_concept: dict[str, list[float]],
         N_eff = N_BASE / (1 + (k - 1) × mean_ICC)
 
     where k = number of candidate layers evaluated per concept (typically 3–5),
-    and N_BASE is the test set size per class (default 300).
+    and N_BASE is the real test set size per class. n_base may be a single int
+    or {concept_name: test_size_per_class}.
 
     layer_aurocs_per_concept: {concept_name: [auroc_layer_1, auroc_layer_2, ...]}
     Each list must have the same length (n_layers_per_concept).
@@ -590,11 +587,25 @@ def compute_layer_icc(layer_aurocs_per_concept: dict[str, list[float]],
 
     mean_icc = float(np.mean(list(icc_scores.values()))) if icc_scores else 0.0
     k_avg    = k_mode
-    N_eff    = int(n_base / (1 + (k_avg - 1) * mean_icc + 1e-9))
+    if isinstance(n_base, dict):
+        missing = [c for c in icc_scores if c not in n_base]
+        if missing:
+            raise RuntimeError(f"Missing n_base values for ICC concepts: {missing}")
+        n_base_per_concept = {c: int(n_base[c]) for c in icc_scores}
+    else:
+        n_base_per_concept = {c: int(n_base) for c in icc_scores}
+
+    n_eff_per_concept = {
+        c: int(n / (1 + (k_avg - 1) * icc_scores[c] + 1e-9))
+        for c, n in n_base_per_concept.items()
+    }
+    N_eff = int(np.mean(list(n_eff_per_concept.values()))) if n_eff_per_concept else 0
 
     return {
         "mean_icc":         mean_icc,
         "N_eff":            N_eff,
+        "n_base_per_concept": n_base_per_concept,
+        "n_eff_per_concept":  n_eff_per_concept,
         "icc_per_concept":  icc_scores,
     }
 

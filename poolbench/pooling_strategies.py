@@ -151,10 +151,10 @@ def pool_SIF_adapted(h: np.ndarray, token_ids: list[int], unigram_probs: dict,
     First-PC subtraction is done at the corpus level in compute_all_pooling_strategies,
     not per-passage.
     unigram_probs: {token_id: float} pre-computed from the PoolBench training corpora.
-    Falls back to pool_mean if unigram_probs is empty.
+    Raises if unigram_probs is empty; silent mean fallback is disabled.
     """
     if not unigram_probs:
-        return pool_mean(h)
+        raise RuntimeError("S2_SIF requires unigram_probs; refusing to fall back to mean pooling")
     weights = np.array([a / (a + unigram_probs.get(tid, a)) for tid in token_ids],
                        dtype=np.float32)
     weights = weights / (weights.sum() + 1e-9)
@@ -170,12 +170,14 @@ def pool_attn_head_ITI_exact(h: np.ndarray, attn_weights_per_head: np.ndarray | 
     positive/negative examples for this concept.
     concept_probe: trained sklearn LogisticRegression with a .head_scores (n_heads,)
                    attribute set by the ITI head-selection step in run_model.py.
-                   Falls back to pool_mean if concept_probe is None or attn is None.
+                   Raises if concept_probe or attention weights are missing.
     Supervision: SUPERVISED — requires labeled corpus at pooling time.
     Citation: Li et al., Inference-Time Intervention, NeurIPS 2023.
     """
-    if attn_weights_per_head is None or concept_probe is None:
-        return pool_mean(h)
+    if attn_weights_per_head is None:
+        raise RuntimeError("S3_ITI_exact requires attention weights; refusing to fall back to mean pooling")
+    if concept_probe is None:
+        raise RuntimeError("S3_ITI_exact requires a concept_probe with head_scores; refusing to fall back to mean pooling")
 
     n_heads = attn_weights_per_head.shape[0]
 
@@ -494,9 +496,12 @@ def build_iti_concept_probes(act_dir, concepts: dict,
             try:
                 clf = LogisticRegression(C=1.0, max_iter=300, solver="lbfgs", random_state=42)
                 scores = cross_val_score(clf, X, y, cv=3, scoring="roc_auc")
-                head_scores[head_idx] = float(np.nanmean(scores))
-            except Exception:
-                head_scores[head_idx] = 0.5
+                score = float(np.nanmean(scores))
+                if not np.isfinite(score):
+                    raise RuntimeError("non-finite cross-validation score")
+                head_scores[head_idx] = score
+            except Exception as exc:
+                raise RuntimeError(f"ITI head probe failed for {concept_name} head {head_idx}: {exc}") from exc
         probes[concept_name] = SimpleNamespace(head_scores=head_scores)
     return probes
 
@@ -545,8 +550,7 @@ def compute_all_pooling_strategies(act_dir, concepts: dict,
         pos_path = act_dir / f"{concept_name}_{partition}_pos.npy"
         neg_path = act_dir / f"{concept_name}_{partition}_neg.npy"
         if not pos_path.exists() or not neg_path.exists():
-            print(f"  [pool] Missing .npy for {concept_name} — skipping")
-            continue
+            raise FileNotFoundError(f"Missing activation .npy for {concept_name}: {pos_path} / {neg_path}")
 
         pos_acts = np.load(pos_path, allow_pickle=True)
         neg_acts = np.load(neg_path, allow_pickle=True)
@@ -580,32 +584,29 @@ def compute_all_pooling_strategies(act_dir, concepts: dict,
                             if np.array_equal(vec, pool_mean(h)):
                                 _fallback_counts["L3_named_entity"] += 1
                         elif _sid == "L4_subword_root":
-                            if tokenizer and token_ids:
-                                vec = _fn(h, token_ids, tokenizer)
-                            else:
-                                vec = pool_mean(h)
-                                _fallback_counts["L4_subword_root"] += 1
+                            if not tokenizer or not token_ids:
+                                raise RuntimeError(f"L4_subword_root/{concept_name} requires tokenizer and token_ids")
+                            vec = _fn(h, token_ids, tokenizer)
                         elif _sid == "L5_SVO":
                             vec = _fn(h, text, offset_mapping)
                             if np.array_equal(vec, pool_mean(h)):
                                 _fallback_counts["L5_SVO"] += 1
                         elif _sid == "S1_attention_weighted":
-                            if attn is not None:
-                                token_inflow = attn.mean(axis=0).mean(axis=0)  # (seq_len,)
-                                vec = _fn(h, token_inflow)
-                            else:
-                                vec = pool_mean(h)  # Mamba2 fallback
+                            if attn is None:
+                                raise RuntimeError(f"S1_attention_weighted/{concept_name} requires attention weights")
+                            token_inflow = attn.mean(axis=0).mean(axis=0)  # (seq_len,)
+                            vec = _fn(h, token_inflow)
                         elif _sid == "S2_SIF":
-                            vec = _fn(h, token_ids, unigram_probs) if (unigram_probs and token_ids) \
-                                  else pool_mean(h)
+                            if not token_ids:
+                                raise RuntimeError(f"S2_SIF/{concept_name} requires token_ids")
+                            vec = _fn(h, token_ids, unigram_probs)
                         elif _sid == "S3_ITI_exact":
                             probe = concept_probes.get(concept_name) if concept_probes else None
                             vec = _fn(h, attn, concept_probe=probe)
                         else:
                             vec = _fn(h)
                     except Exception as exc:
-                        print(f"  [pool] {_sid}/{concept_name}: {exc} — fallback mean")
-                        vec = pool_mean(h)
+                        raise RuntimeError(f"Pooling failed for {_sid}/{concept_name}: {exc}") from exc
                     pooled.append(vec)
                 return np.stack(pooled)   # (n_passages, d_model)
 
@@ -685,7 +686,7 @@ def compute_pooled_vectors(
     dep_triggers     : list of trigger words for L2_dependency_rel
     """
     if strategy_id not in STRATEGY_REGISTRY:
-        return np.stack([item["hidden"].mean(0) for item in activation_items]).astype(np.float32)
+        raise KeyError(f"Unknown pooling strategy: {strategy_id}")
 
     pool_fn = STRATEGY_REGISTRY[strategy_id][0]
     dep_triggers = dep_triggers or []
@@ -706,23 +707,26 @@ def compute_pooled_vectors(
             elif strategy_id == "L3_named_entity":
                 vec = pool_fn(h, text, offsets)
             elif strategy_id == "L4_subword_root":
-                vec = pool_fn(h, tids, tokenizer) if (tokenizer and tids) else pool_mean(h)
+                if not tokenizer or not tids:
+                    raise RuntimeError("L4_subword_root requires tokenizer and token_ids")
+                vec = pool_fn(h, tids, tokenizer)
             elif strategy_id == "L5_SVO":
                 vec = pool_fn(h, text, offsets)
             elif strategy_id == "S1_attention_weighted":
-                if attn is not None:
-                    inflow = attn.mean(axis=0).mean(axis=0)
-                    vec = pool_fn(h, inflow)
-                else:
-                    vec = pool_mean(h)
+                if attn is None:
+                    raise RuntimeError("S1_attention_weighted requires attention weights")
+                inflow = attn.mean(axis=0).mean(axis=0)
+                vec = pool_fn(h, inflow)
             elif strategy_id == "S2_SIF":
-                vec = pool_fn(h, tids, unigram_probs) if (unigram_probs and tids) else pool_mean(h)
+                if not tids:
+                    raise RuntimeError("S2_SIF requires token_ids")
+                vec = pool_fn(h, tids, unigram_probs)
             elif strategy_id == "S3_ITI_exact":
                 vec = pool_fn(h, attn, concept_probe=concept_probe)
             else:
                 vec = pool_fn(h)
-        except Exception:
-            vec = pool_mean(h)
+        except Exception as exc:
+            raise RuntimeError(f"Pooling failed for {strategy_id}: {exc}") from exc
 
         pooled.append(vec)
 

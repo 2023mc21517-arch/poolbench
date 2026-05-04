@@ -16,7 +16,7 @@ Public API
 train_classifier_b(concept, classifiers_dir, device, max_samples, force_retrain)
     → path to saved classifier dir (or None for LLM-scored concepts)
 load_classifier_b(concept, classifiers_dir, device)
-    → (AutoModelForSequenceClassification, AutoTokenizer) or None
+    → (AutoModelForSequenceClassification, AutoTokenizer) or Claude zero-shot scorer
 score_texts(texts, classifier, tokenizer, device, batch_size)
     → list[float]  (0.0–1.0 P(positive))
 """
@@ -24,6 +24,8 @@ score_texts(texts, classifier, tokenizer, device, batch_size)
 from __future__ import annotations
 
 import json
+import os
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -33,7 +35,10 @@ from poolbench.logger import get_logger, gpu_mem_str, free_gpu_memory
 
 log = get_logger("poolbench.classifier_b")
 
-ZERO_SHOT_MODEL_ID = "facebook/bart-large-mnli"
+ZERO_SHOT_MODEL_ID = os.environ.get(
+    "POOLBENCH_ZERO_SHOT_MODEL_ID",
+    "claude-claude-sonnet-4-5-20251022",
+)
 
 # ── Concepts handled by zero-shot LLM (§52) ──────────────────────────────────
 LLM_SCORED_CONCEPTS: set[str] = {
@@ -175,8 +180,7 @@ def _load_anchor_rows(concept: str, max_per_class: int) -> tuple[list[str], list
     """
     cfg = ANCHOR_CONFIGS.get(concept)
     if cfg is None:
-        log.warning(f"  [classifier_b] No anchor config for concept '{concept}' — skipping")
-        return None
+        raise RuntimeError(f"No Classifier B anchor config for concept '{concept}'")
 
     if cfg.get("_custom_loader"):
         return _custom_load(concept, cfg, max_per_class)
@@ -186,8 +190,7 @@ def _load_anchor_rows(concept: str, max_per_class: int) -> tuple[list[str], list
         ds = load_dataset(cfg["hf_id"], cfg.get("config"),
                           split=cfg["split"], trust_remote_code=True)
     except Exception as exc:
-        log.error(f"  [classifier_b] Failed to load anchor dataset for '{concept}': {exc}")
-        return None
+        raise RuntimeError(f"Failed to load anchor dataset for '{concept}': {exc}") from exc
 
     text_col  = cfg["text_col"]
     label_col = cfg["label_col"]
@@ -232,9 +235,9 @@ def _load_anchor_rows(concept: str, max_per_class: int) -> tuple[list[str], list
     neg_texts = neg_texts[:max_per_class]
 
     if len(pos_texts) < 50 or len(neg_texts) < 50:
-        log.warning(f"  [classifier_b] Too few anchor samples for '{concept}': "
-                    f"pos={len(pos_texts)} neg={len(neg_texts)} — skipping")
-        return None
+        raise RuntimeError(
+            f"Too few anchor samples for '{concept}': pos={len(pos_texts)} neg={len(neg_texts)}"
+        )
 
     texts  = pos_texts + neg_texts
     labels = [1] * len(pos_texts) + [0] * len(neg_texts)
@@ -278,11 +281,10 @@ def _custom_load(concept: str, cfg: dict,
                             break
                     if len(neg_texts) >= max_per_class:
                         break
-            except Exception:
-                log.warning(f"  [classifier_b] narrative: could not load wikipedia negatives")
-                return None
+            except Exception as exc:
+                raise RuntimeError("narrative: could not load wikipedia negatives") from exc
             if len(pos_texts) < 50 or len(neg_texts) < 50:
-                return None
+                raise RuntimeError(f"narrative anchor too small: pos={len(pos_texts)} neg={len(neg_texts)}")
             texts  = pos_texts[:max_per_class] + neg_texts[:max_per_class]
             labels = [1] * min(len(pos_texts), max_per_class) + [0] * min(len(neg_texts), max_per_class)
             return texts, labels
@@ -304,7 +306,7 @@ def _custom_load(concept: str, cfg: dict,
                 if len(pos_texts) >= max_per_class and len(neg_texts) >= max_per_class:
                     break
             if len(pos_texts) < 50 or len(neg_texts) < 50:
-                return None
+                raise RuntimeError(f"numerical_precision anchor too small: pos={len(pos_texts)} neg={len(neg_texts)}")
             texts  = pos_texts[:max_per_class] + neg_texts[:max_per_class]
             labels = [1] * min(len(pos_texts), max_per_class) + [0] * min(len(neg_texts), max_per_class)
             return texts, labels
@@ -322,17 +324,16 @@ def _custom_load(concept: str, cfg: dict,
                 if decl:
                     neg_texts.append(decl)
             if len(pos_texts) < 10 or len(neg_texts) < 10:
-                return None
+                raise RuntimeError(f"code_docs anchor too small: pos={len(pos_texts)} neg={len(neg_texts)}")
             texts  = pos_texts[:max_per_class] + neg_texts[:max_per_class]
             labels = [1] * min(len(pos_texts), max_per_class) + [0] * min(len(neg_texts), max_per_class)
             log.info(f"  [classifier_b] code_docs anchor: pos={len(pos_texts)} neg={len(neg_texts)}")
             return texts, labels
 
     except Exception as exc:
-        log.error(f"  [classifier_b] Custom loader error for '{concept}': {exc}")
-        return None
+        raise RuntimeError(f"Custom loader error for '{concept}': {exc}") from exc
 
-    return None
+    raise RuntimeError(f"No custom loader branch implemented for '{concept}'")
 
 
 # ── Training ───────────────────────────────────────────────────────────────────
@@ -365,7 +366,7 @@ def train_classifier_b(
 
     data = _load_anchor_rows(concept, max_samples)
     if data is None:
-        return None
+        raise RuntimeError(f"Classifier B anchor loader returned None for '{concept}'")
     texts, labels = data
 
     import torch  # noqa: PLC0415
@@ -495,20 +496,31 @@ def load_classifier_b(
 ):
     """
     Load a trained Classifier B for `concept`.
-    Returns (model, tokenizer) or (None, None) for LLM-scored concepts.
+    Returns (model, tokenizer) for BERT-scored concepts or a Claude zero-shot scorer
+    for LLM-scored concepts.
     """
     if concept in LLM_SCORED_CONCEPTS:
-        from transformers import pipeline  # noqa: PLC0415
-        log.info(f"  [classifier_b] Loading zero-shot scorer for '{concept}' → {ZERO_SHOT_MODEL_ID}")
-        device_s = str(device)
-        device_id = int(device_s.split(":", 1)[1]) if device_s.startswith("cuda:") else (0 if device_s == "cuda" else -1)
-        scorer = pipeline("zero-shot-classification", model=ZERO_SHOT_MODEL_ID, device=device_id)
-        return {"type": "zero_shot", "concept": concept, "pipeline": scorer}, None
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            raise RuntimeError(
+                f"{concept} requires Claude zero-shot scoring, but ANTHROPIC_API_KEY is not set"
+            )
+        try:
+            import anthropic  # noqa: PLC0415
+        except ImportError as exc:
+            raise RuntimeError(
+                "Claude zero-shot scoring requires the 'anthropic' package. Install it before running SCP/D3."
+            ) from exc
+        log.info(f"  [classifier_b] Loading Claude zero-shot scorer for '{concept}' → {ZERO_SHOT_MODEL_ID}")
+        return {
+            "type": "claude_zero_shot",
+            "concept": concept,
+            "client": anthropic.Anthropic(),
+            "model_id": ZERO_SHOT_MODEL_ID,
+        }, None
 
     save_dir = Path(classifiers_dir) / concept
     if not save_dir.exists():
-        log.warning(f"  [classifier_b] No saved classifier for '{concept}' at {save_dir}")
-        return None, None
+        raise FileNotFoundError(f"No saved classifier for '{concept}' at {save_dir}")
 
     from transformers import AutoTokenizer, AutoModelForSequenceClassification  # noqa: PLC0415
     tok   = AutoTokenizer.from_pretrained(str(save_dir))
@@ -529,26 +541,49 @@ def score_texts(
     If classifier is a zero-shot scorer, returns entailment probability for the
     concept's positive definition.
     """
-    if isinstance(classifier, dict) and classifier.get("type") == "zero_shot":
+    if isinstance(classifier, dict) and classifier.get("type") == "claude_zero_shot":
         from poolbench.concepts import CONCEPTS  # noqa: PLC0415
         concept = classifier["concept"]
-        pipe = classifier["pipeline"]
+        client = classifier["client"]
+        model_id = classifier["model_id"]
         meta = CONCEPTS.get(concept, {})
-        pos_label = meta.get("positive_def", concept.replace("_", " "))
-        neg_label = meta.get("negative_def", f"not {concept.replace('_', ' ')}")
+        positive_def = meta.get("positive_def", concept.replace("_", " "))
+        negative_def = meta.get("negative_def", f"not {concept.replace('_', ' ')}")
         scores: list[float] = []
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i:i + batch_size]
-            outputs = pipe(batch, candidate_labels=[pos_label, neg_label], multi_label=False)
-            if isinstance(outputs, dict):
-                outputs = [outputs]
-            for out in outputs:
-                labels = out.get("labels", [])
-                vals = out.get("scores", [])
-                scores.append(float(vals[labels.index(pos_label)]) if pos_label in labels else 0.5)
+        for text in texts:
+            prompt = (
+                "You are scoring whether a generated passage expresses a target concept.\n"
+                "Return ONLY valid JSON with one key, score, whose value is a number from 0.0 to 1.0.\n"
+                "0.0 means the target concept is absent. 1.0 means it is strongly present.\n\n"
+                f"Target concept: {concept}\n"
+                f"Positive definition: {positive_def}\n"
+                f"Negative definition: {negative_def}\n\n"
+                f"Passage:\n{text}\n"
+            )
+            try:
+                msg = client.messages.create(
+                    model=model_id,
+                    max_tokens=40,
+                    temperature=0,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+            except Exception as exc:
+                raise RuntimeError(f"Claude zero-shot scoring failed for concept={concept}: {exc}") from exc
+            raw = "".join(block.text for block in msg.content if getattr(block, "type", None) == "text")
+            try:
+                parsed = json.loads(raw)
+                score = float(parsed["score"])
+            except Exception:
+                match = re.search(r"\b(?:0(?:\.\d+)?|1(?:\.0+)?)\b", raw)
+                if not match:
+                    raise RuntimeError(f"Claude returned an unparsable score for concept={concept}: {raw!r}")
+                score = float(match.group(0))
+            if not 0.0 <= score <= 1.0:
+                raise RuntimeError(f"Claude score out of [0,1] for concept={concept}: {score}")
+            scores.append(score)
         return scores
     if classifier is None or tokenizer is None:
-        return [0.5] * len(texts)
+        raise RuntimeError("score_texts received no classifier/tokenizer; refusing constant-score fallback")
 
     import torch  # noqa: PLC0415
     probs = []

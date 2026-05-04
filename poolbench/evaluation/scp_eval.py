@@ -128,8 +128,7 @@ def _compute_steering_vector(
     neg_acts = load_activations(act_dir, model_name, layer_idx, concept_name, "neg", partition="train")
 
     if pos_acts is None or neg_acts is None:
-        log.warning(f"    [scp] missing activations for {concept_name} L{layer_idx} — skip")
-        return None
+        raise RuntimeError(f"[scp] missing train activations for {concept_name} L{layer_idx}")
 
     try:
         pos_vecs = compute_pooled_vectors(pos_acts, strategy_id,
@@ -143,12 +142,12 @@ def _compute_steering_vector(
         return None
 
     if len(pos_vecs) == 0 or len(neg_vecs) == 0:
-        return None
+        raise RuntimeError(f"[scp] empty pooled vectors for {concept_name}/{strategy_id}")
 
     sv = pos_vecs.mean(0) - neg_vecs.mean(0)
     norm = np.linalg.norm(sv)
     if norm < 1e-9:
-        return None
+        raise RuntimeError(f"[scp] zero-norm steering vector for {concept_name}/{strategy_id}")
     return (sv / norm).astype(np.float32)
 
 
@@ -267,8 +266,7 @@ def _compute_concept_scp(
             break
 
     if _first_sv is None:
-        log.warning(f"    [scp] no steering vectors available for concept={concept_name} — skip")
-        return {}
+        raise RuntimeError(f"[scp] no steering vectors available for concept={concept_name}")
 
     log.info(f"      [baseline] Generating unsteered baseline for {concept_name}  GPU: {gpu_mem_str(device)}")
     baseline_texts = _generate_with_steering(
@@ -286,8 +284,7 @@ def _compute_concept_scp(
             concept_probe=concept_probes.get(concept_name) if concept_probes else None,
         )
         if sv is None:
-            log.warning(f"      skipping strategy {strat_id} (no steering vector)")
-            continue
+            raise RuntimeError(f"[scp] no steering vector for {concept_name}/{strat_id}")
 
         log.info(f"      strategy {strat_id}  GPU: {gpu_mem_str(device)}")
 

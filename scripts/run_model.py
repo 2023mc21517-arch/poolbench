@@ -131,6 +131,15 @@ CLASSIFIERS_DIR = BASE_DIR / "results" / "bert_classifiers"
 SCP_DIR       = BASE_DIR / "results" / "scp"
 D3_DIR        = BASE_DIR / "results" / "disentanglement"
 
+LAYER_SELECTION_REPRESENTATIVE_CONCEPTS = [
+    "hedging",        # sparse lexical
+    "imdb_sentiment", # dense lexical
+    "causation",      # syntactic
+    "academic_tone",  # register
+    "planning",       # semantic abstract
+]
+LAYER_SELECTION_STRATEGIES = ["A1_mean", "P1_last_token", "A2_max"]
+
 # Initialise the shared logger (writes to stdout + log file)
 log = get_logger(
     "poolbench",
@@ -147,13 +156,22 @@ def _safe_load_json(path: Path) -> dict | None:
             data = json.load(f)
         return data if isinstance(data, dict) else None
     except Exception as exc:
-        log.warning(f"  [checkpoint] Could not read {path}: {exc} — recomputing")
-        return None
+        raise RuntimeError(f"Checkpoint exists but could not be read: {path}: {exc}") from exc
 
 
 def _missing_keys(data: dict, required_keys: list[str]) -> list[str]:
     """Return required keys absent from a checkpoint dictionary."""
     return [k for k in required_keys if k not in data]
+
+
+def _test_size_for_concept(concept_name: str) -> int:
+    """Return the real held-out test size per class for a concept."""
+    from poolbench.utils import load_jsonl  # noqa: PLC0415
+    pos_path = CORPUS_DIR / concept_name / "test_pos.jsonl"
+    neg_path = CORPUS_DIR / concept_name / "test_neg.jsonl"
+    if not pos_path.exists() or not neg_path.exists():
+        raise FileNotFoundError(f"Missing test split for {concept_name}: {pos_path} / {neg_path}")
+    return min(len(load_jsonl(str(pos_path))), len(load_jsonl(str(neg_path))))
 
 
 # ── Step 1: Extract activations ───────────────────────────────────────────────
@@ -198,6 +216,11 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
     primary_out = AUROC_DIR / model_name / "best_layer_auroc.json"
     existing_summary = _safe_load_json(primary_out) if skip_existing else None
     if existing_summary is not None:
+        if existing_summary.get("layer_selection_method") != "methodology_representative_mean":
+            raise RuntimeError(
+                f"Existing Step 2 checkpoint lacks current layer-selection method metadata: {primary_out}. "
+                "Rerun with --force_from_step 2 or earlier."
+            )
         per_layer_existing = existing_summary.get("per_layer", {})
         layers_complete = True
         for layer_idx in cfg["candidate_layers"]:
@@ -243,8 +266,7 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
             test_pos = load_activations(ACT_DIR, model_name, layer_idx, concept_name, "pos", partition="test")
             test_neg = load_activations(ACT_DIR, model_name, layer_idx, concept_name, "neg", partition="test")
             if train_pos is None or train_neg is None or test_pos is None or test_neg is None:
-                log.warning(f"  [pool] {concept_name} L{layer_idx}: activations missing — skip")
-                continue
+                raise RuntimeError(f"[pool] {concept_name} L{layer_idx}: train/test activations missing")
             # Apply all pooling strategies
             concept_dict = {concept_name: concepts_to_run[concept_name]}
             train_layer_pooled = compute_all_pooling_strategies(
@@ -287,9 +309,8 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
         json.dump({"rates": fallback_rates, **fallback_accumulator}, f, indent=2)
     log.info(f"  [pool] aggregate fallback rates saved → {fallback_out}")
 
-    # Modal layer selection: for each strategy, find best layer across concepts
-    best_layer = _select_modal_layer(per_layer_results, cfg["candidate_layers"])
-    log.info(f"\n  Best layer (modal): {best_layer}")
+    best_layer = _select_methodology_layer(per_layer_results, cfg["candidate_layers"], list(concepts_to_run))
+    log.info(f"\n  Best layer (methodology mean over representative concepts × mean/last/max): {best_layer}")
 
     # Save the best-layer results as the primary leaderboard input
     primary_out.parent.mkdir(parents=True, exist_ok=True)
@@ -297,9 +318,48 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
         json.dump({
             "best_layer":    best_layer,
             "per_layer":     {str(k): v for k, v in per_layer_results.items()},
+            "layer_selection_method": "methodology_representative_mean",
+            "layer_selection_concepts": LAYER_SELECTION_REPRESENTATIVE_CONCEPTS,
+            "layer_selection_strategies": LAYER_SELECTION_STRATEGIES,
         }, f, indent=2)
 
     return {"best_layer": best_layer, "per_layer": per_layer_results}
+
+
+def _select_methodology_layer(per_layer_results: dict[int, dict],
+                              candidate_layers: list[int],
+                              concepts_to_run: list[str]) -> int:
+    """
+    Select shared layer by highest mean AUROC over representative concepts and
+    mean/last/max pooling, matching the methodology.
+    """
+    if len(concepts_to_run) == 1:
+        selected_concepts = concepts_to_run
+    else:
+        selected_concepts = [c for c in LAYER_SELECTION_REPRESENTATIVE_CONCEPTS if c in concepts_to_run]
+    if not selected_concepts:
+        raise RuntimeError("No representative concepts available for layer selection")
+
+    layer_scores: dict[int, float] = {}
+    for layer in candidate_layers:
+        res = per_layer_results.get(layer, {})
+        scores = []
+        missing = []
+        for concept in selected_concepts:
+            for strategy in LAYER_SELECTION_STRATEGIES:
+                key = f"{concept}_{strategy}"
+                auroc = res.get(key, {}).get("auroc")
+                if auroc is None:
+                    missing.append(key)
+                else:
+                    scores.append(float(auroc))
+        if missing:
+            raise RuntimeError(f"Layer {layer} missing layer-selection AUROC cells: {missing}")
+        layer_scores[layer] = float(np.mean(scores))
+        log.info(f"  [layer-select] L{layer}: mean AUROC={layer_scores[layer]:.4f} "
+                 f"over concepts={selected_concepts} strategies={LAYER_SELECTION_STRATEGIES}")
+
+    return max(layer_scores, key=layer_scores.get)
 
 
 def _select_modal_layer(per_layer_results: dict[int, dict],
@@ -358,7 +418,7 @@ def step_linearity(model_name: str, best_layer: int,
         pos_acts = load_activations(ACT_DIR, model_name, best_layer, concept_name, "pos", partition="train")
         neg_acts = load_activations(ACT_DIR, model_name, best_layer, concept_name, "neg", partition="train")
         if pos_acts is None or neg_acts is None:
-            continue
+            raise RuntimeError(f"[linearity] missing train activations for {concept_name} L{best_layer}")
 
         pos_pooled = np.stack([item["hidden"].mean(0) for item in pos_acts])
         neg_pooled = np.stack([item["hidden"].mean(0) for item in neg_acts])
@@ -405,8 +465,7 @@ def step_icc(model_name: str, construction_method: str = DEFAULT_CONSTRUCTION,
 
     best_layer_path = AUROC_DIR / model_name / "best_layer_auroc.json"
     if not best_layer_path.exists():
-        log.warning(f"  [icc] {best_layer_path} not found — run step 2 first.")
-        return
+        raise FileNotFoundError(f"[icc] {best_layer_path} not found — run step 2 first")
 
     with open(best_layer_path) as f:
         data = json.load(f)
@@ -423,9 +482,11 @@ def step_icc(model_name: str, construction_method: str = DEFAULT_CONSTRUCTION,
                 aucs.append(auroc)
         if aucs:
             layer_aurocs_per_concept[concept_name] = aucs
+        else:
+            raise RuntimeError(f"[icc] No A1_mean AUROC values found for concept={concept_name}")
 
     cfg     = MODEL_CONFIGS[model_name]
-    n_base  = 300   # test set size per class
+    n_base  = {concept_name: _test_size_for_concept(concept_name) for concept_name in layer_aurocs_per_concept}
     icc_res = compute_layer_icc(layer_aurocs_per_concept, n_base=n_base)
     icc_res["model_name"] = model_name
 
@@ -454,10 +515,14 @@ def step_nemenyi(all_model_auroc_results: dict[str, dict],
     for model_name in models:
         icc_path = ICC_DIR / f"{model_name}_icc.json"
         icc_data = _safe_load_json(icc_path)
-        if icc_data and icc_data.get("N_eff"):
-            effective_n += len(concepts) * (float(icc_data["N_eff"]) / 300.0)
-        else:
-            effective_n += len(concepts)
+        if not icc_data:
+            raise RuntimeError(f"Missing ICC file required for ICC-adjusted Nemenyi: {icc_path}")
+        n_base_map = icc_data.get("n_base_per_concept", {})
+        n_eff_map = icc_data.get("n_eff_per_concept", {})
+        missing = [c for c in concepts if c not in n_base_map or c not in n_eff_map]
+        if missing:
+            raise RuntimeError(f"ICC file {icc_path} missing per-concept N values for: {missing}")
+        effective_n += sum(float(n_eff_map[c]) / max(float(n_base_map[c]), 1.0) for c in concepts)
 
     auroc_matrix = build_nemenyi_auroc_matrix(
         auroc_results_per_model = all_model_auroc_results,
@@ -547,8 +612,7 @@ def step_keyword_ablation(
 
         jsonl_path = CORPUS_DIR / concept_name / "test_pos.jsonl"
         if not jsonl_path.exists():
-            log.warning(f"  [ablation] {concept_name}: test_pos.jsonl not found")
-            continue
+            raise FileNotFoundError(f"[ablation] {concept_name}: test_pos.jsonl not found")
 
         records   = load_jsonl(str(jsonl_path))
         ablated_texts = [pattern.sub("", r["text"]).strip() for r in records]
@@ -561,15 +625,13 @@ def step_keyword_ablation(
             abl_items.extend(items)
 
         if not abl_items:
-            log.warning(f"  [ablation] {concept_name}: no ablated activations extracted")
-            continue
+            raise RuntimeError(f"[ablation] {concept_name}: no ablated activations extracted")
 
         # Full activations already extracted in Step 1
         full_pos = load_activations(ACT_DIR, model_name, best_layer, concept_name, "pos", partition="test")
         full_neg = load_activations(ACT_DIR, model_name, best_layer, concept_name, "neg", partition="test")
         if full_pos is None or full_neg is None:
-            log.warning(f"  [ablation] {concept_name}: full activations not found — run Step 1 first")
-            continue
+            raise RuntimeError(f"[ablation] {concept_name}: full test activations not found — run Step 1 first")
 
         pos_full_pooled = np.stack([item["hidden"].mean(0) for item in full_pos])
         neg_full_pooled = np.stack([item["hidden"].mean(0) for item in full_neg])
@@ -656,6 +718,37 @@ def step_scp(
     free_gpu_memory(device)
     log.info(f"  Step 6 done. GPU: {gpu_mem_str(device)}")
     return scp_results
+
+
+def step_prompted_baseline(
+    model_name: str,
+    device: str,
+    concept_filter: str | None = None,
+    skip_existing: bool = True,
+) -> dict:
+    """Compute the unranked prompted-baseline SCP row required by the methodology."""
+    from poolbench.evaluation.scp_eval import compute_prompted_baseline  # noqa: PLC0415
+
+    concepts = CONCEPT_NAMES if concept_filter is None else [concept_filter]
+    cfg = MODEL_CONFIGS[model_name]
+    out_path = SCP_DIR / f"{model_name}_prompted_baseline.json"
+    if skip_existing and out_path.exists():
+        existing = _safe_load_json(out_path)
+        missing = _missing_keys(existing or {}, concepts)
+        if not missing:
+            log.info(f"  [checkpoint] Prompted baseline already complete → {out_path}; skipping")
+            return existing or {}
+        raise RuntimeError(f"Prompted baseline checkpoint is incomplete: missing {missing}")
+
+    with log_step(log, f"Step 6b prompted baseline  model={model_name}", device):
+        return compute_prompted_baseline(
+            model_name      = model_name,
+            hf_id           = cfg["hf_id"],
+            device          = device,
+            concepts        = concepts,
+            classifiers_dir = CLASSIFIERS_DIR,
+            out_dir         = SCP_DIR,
+        )
 
 
 # ── Step 7: D3 Disentanglement ───────────────────────────────────────────────
@@ -758,6 +851,10 @@ def run_model(model_name: str, args: argparse.Namespace) -> dict:
             step_scp(model_name, best_layer, args.device, concept_filter,
                      skip_existing=not force_step(6))
 
+            # Step 6b — Prompted baseline row (not ranked)
+            step_prompted_baseline(model_name, args.device, concept_filter,
+                                   skip_existing=not force_step(6))
+
             # Step 7 — D3 Disentanglement
             step_disentanglement(model_name, best_layer, args.device, concept_filter,
                                  skip_existing=not force_step(7))
@@ -769,7 +866,9 @@ def run_model(model_name: str, args: argparse.Namespace) -> dict:
             data = json.load(f)
         best_layer_auroc = data.get("per_layer", {}).get(str(best_layer), {})
     else:
-        best_layer_auroc = {}
+        raise FileNotFoundError(f"Missing best-layer AUROC file: {best_layer_path}")
+    if not best_layer_auroc:
+        raise RuntimeError(f"Best-layer AUROC results are empty for {model_name} layer {best_layer}")
 
     elapsed = time.perf_counter() - t_start
     log.info(f"\n  ✓ Pipeline complete: {model_name}  total={elapsed:.0f}s  GPU: {gpu_mem_str(args.device)}")
