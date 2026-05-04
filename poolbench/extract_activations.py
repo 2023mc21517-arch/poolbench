@@ -12,7 +12,8 @@ Each call saves per-concept .npy files (object arrays of dicts) to:
   {out_dir}/{model_name}/{concept}_neg.npy
 
 Each element in the saved object array is a dict:
-  "hidden"          — (seq_len, d_model) float32
+    "hidden"          — (seq_len, d_model) float16 on disk; downstream pooling
+                                             casts back to float32 for computation
   "offset_mapping"  — list of (char_start, char_end) int tuples
   "text"            — original passage string (for L1–L3 spaCy)
   "token_ids"       — list of int HF token IDs (for L4 / S3_SIF)
@@ -245,13 +246,13 @@ def _extract_batch(
 
         if is_eo or is_ed:
             # BERT / T5: no strong position direction; take from left
-            h = h_full[:seq_len].astype(np.float32)
+            h = h_full[:seq_len].astype(np.float16)
             offsets = [(int(s), int(e)) for s, e in offset_mapping[i, :seq_len].numpy()]
         else:
             # Causal LM with left-padding: last seq_len tokens are the real tokens
             padded_len = h_full.shape[0]
             start_pos  = padded_len - seq_len
-            h          = h_full[start_pos:].astype(np.float32)
+            h          = h_full[start_pos:].astype(np.float16)
             offsets    = [(int(s), int(e)) for s, e in
                           offset_mapping[i, start_pos:padded_len].numpy()]
 
@@ -273,7 +274,7 @@ def _extract_batch(
             token_ids_clean = token_ids[start_pos:].tolist()
 
         results.append({
-            "hidden":         h,              # (seq_len, d_model) float32
+            "hidden":         h,              # (seq_len, d_model) float16 on disk
             "offset_mapping": offsets,        # list of (start, end)
             "text":           text,
             "token_ids":      token_ids_clean,

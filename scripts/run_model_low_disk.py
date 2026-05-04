@@ -31,7 +31,11 @@ from scripts.run_model import (  # noqa: E402
     ICC_DIR,
     LINEARITY_DIR,
     MODEL_CONFIGS,
+    RANKED_STRATEGIES,
     SCP_DIR,
+    LAYER_SELECTION_REPRESENTATIVE_CONCEPTS,
+    LAYER_SELECTION_STRATEGIES,
+    _select_methodology_layer,
     step_icc,
     step_keyword_ablation,
     step_linearity,
@@ -94,6 +98,51 @@ def best_layer_for_model(model_name: str) -> int:
     return int(best_layer)
 
 
+def pool_one_concept_layer(model_name: str, concept: str, layer_idx: int, force: bool) -> None:
+    """Run Step 2 for exactly one concept and one layer, preserving low disk use."""
+    cfg = MODEL_CONFIGS[model_name]
+    original_layers = list(cfg["candidate_layers"])
+    cfg["candidate_layers"] = [layer_idx]
+    try:
+        step_pool_and_auroc(model_name, concept_filter=concept, skip_existing=not force)
+    finally:
+        cfg["candidate_layers"] = original_layers
+
+
+def rebuild_best_layer_summary(model_name: str, candidate_layers: list[int]) -> int:
+    """Rebuild best_layer_auroc.json from completed per-layer AUROC files."""
+    per_layer: dict[int, dict] = {}
+    for layer_idx in candidate_layers:
+        path = AUROC_DIR / model_name / f"layer_{layer_idx}" / f"{model_name}_auroc_results.json"
+        if not path.exists():
+            raise FileNotFoundError(f"Missing per-layer AUROC file: {path}")
+        with open(path) as f:
+            layer_results = json.load(f)
+        missing = [
+            f"{concept}_{strategy}"
+            for concept in CONCEPT_NAMES
+            for strategy in RANKED_STRATEGIES
+            if f"{concept}_{strategy}" not in layer_results
+        ]
+        if missing:
+            raise RuntimeError(f"Layer {layer_idx} AUROC file incomplete; missing examples: {missing[:10]}")
+        per_layer[layer_idx] = layer_results
+
+    best_layer = _select_methodology_layer(per_layer, candidate_layers, list(CONCEPT_NAMES))
+    out_path = AUROC_DIR / model_name / "best_layer_auroc.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w") as f:
+        json.dump({
+            "best_layer": best_layer,
+            "per_layer": {str(k): v for k, v in per_layer.items()},
+            "layer_selection_method": "methodology_representative_mean",
+            "layer_selection_concepts": LAYER_SELECTION_REPRESENTATIVE_CONCEPTS,
+            "layer_selection_strategies": LAYER_SELECTION_STRATEGIES,
+        }, f, indent=2)
+    log.info(f"[low-disk] rebuilt best-layer summary → {out_path}")
+    return int(best_layer)
+
+
 def reset_model_outputs(model_name: str) -> None:
     """Remove model-specific generated outputs for a clean low-disk rerun."""
     paths = [
@@ -127,16 +176,19 @@ def run_low_disk(model_name: str, device: str, skip_scp: bool, force: bool) -> N
     log.info(f"candidate_layers={candidate_layers} GPU={gpu_mem_str(device)}")
     log.info("=" * 60)
 
-    # Pass A: extract one concept across all candidate layers, compute D1 AUROC,
-    # save JSON, then delete that concept's activations.
+    # Pass A: extract one concept at one candidate layer, compute that layer's
+    # D1 AUROC, save JSON, then delete those activation files before extracting
+    # the next layer. This keeps peak storage low even for concepts with long text.
     for concept in CONCEPT_NAMES:
         log.info(f"\n=== Low-disk D1 pass: {concept} ===")
-        extract_concept_layers(model_name, concept, candidate_layers, device, skip_existing=not force)
-        step_pool_and_auroc(model_name, concept_filter=concept, skip_existing=not force)
-        cleanup_concept_activations(model_name, candidate_layers, {concept})
-        free_gpu_memory(device)
+        for layer_idx in candidate_layers:
+            log.info(f"\n--- Low-disk D1 layer pass: concept={concept} layer={layer_idx} ---")
+            extract_concept_layers(model_name, concept, [layer_idx], device, skip_existing=not force)
+            pool_one_concept_layer(model_name, concept, layer_idx, force=force)
+            cleanup_concept_activations(model_name, [layer_idx], {concept})
+            free_gpu_memory(device)
 
-    best_layer = best_layer_for_model(model_name)
+    best_layer = rebuild_best_layer_summary(model_name, candidate_layers)
     log.info(f"\n[low-disk] Shared best layer selected from saved D1 results: {best_layer}")
     step_icc(model_name, skip_existing=not force)
 

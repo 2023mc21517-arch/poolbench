@@ -541,7 +541,7 @@ def compute_all_pooling_strategies(act_dir, concepts: dict,
     Load activation .npy files from act_dir and apply every ranked strategy.
 
     Each .npy file stores a numpy object array of dicts with keys:
-        "hidden"         — (seq_len, d_model) float32
+        "hidden"         — (seq_len, d_model) float16 on disk, cast to float32 for pooling
         "offset_mapping" — list of (char_start, char_end), length seq_len
         "text"           — original passage string (for L1–L5 spaCy)
         "token_ids"      — list of int HF token IDs (for L4/S2)
@@ -592,7 +592,7 @@ def compute_all_pooling_strategies(act_dir, concepts: dict,
             def _apply(acts, _sid=strategy_id, _fn=pool_fn, _trg=dep_triggers):
                 pooled = []
                 for item in acts:
-                    h              = item["hidden"]
+                    h              = np.asarray(item["hidden"], dtype=np.float32)
                     offset_mapping = item.get("offset_mapping", [])
                     text           = item.get("text", "")
                     token_ids      = item.get("token_ids", [])
@@ -723,7 +723,7 @@ def compute_pooled_vectors(
     pooled = []
 
     for item in activation_items:
-        h      = item["hidden"]          # (seq_len, d_model)
+        h      = np.asarray(item["hidden"], dtype=np.float32)  # (seq_len, d_model)
         text   = item.get("text", "")
         offsets = item.get("offset_mapping", [])
         tids   = item.get("token_ids", [])

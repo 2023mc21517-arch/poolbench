@@ -496,8 +496,8 @@ def step_linearity(model_name: str, best_layer: int,
         if pos_acts is None or neg_acts is None:
             raise RuntimeError(f"[linearity] missing train activations for {concept_name} L{best_layer}")
 
-        pos_pooled = np.stack([item["hidden"].mean(0) for item in pos_acts])
-        neg_pooled = np.stack([item["hidden"].mean(0) for item in neg_acts])
+        pos_pooled = np.stack([np.asarray(item["hidden"], dtype=np.float32).mean(0) for item in pos_acts])
+        neg_pooled = np.stack([np.asarray(item["hidden"], dtype=np.float32).mean(0) for item in neg_acts])
 
         result = check_linearity_assumption(pos_pooled, neg_pooled, concept_name,
                                              construction_method)
@@ -711,9 +711,9 @@ def step_keyword_ablation(
         if full_pos is None or full_neg is None:
             raise RuntimeError(f"[ablation] {concept_name}: full test activations not found — run Step 1 first")
 
-        pos_full_pooled = np.stack([item["hidden"].mean(0) for item in full_pos])
-        neg_full_pooled = np.stack([item["hidden"].mean(0) for item in full_neg])
-        pos_abl_pooled  = np.stack([item["hidden"].mean(0) for item in abl_items])
+        pos_full_pooled = np.stack([np.asarray(item["hidden"], dtype=np.float32).mean(0) for item in full_pos])
+        neg_full_pooled = np.stack([np.asarray(item["hidden"], dtype=np.float32).mean(0) for item in full_neg])
+        pos_abl_pooled  = np.stack([np.asarray(item["hidden"], dtype=np.float32).mean(0) for item in abl_items])
         neg_abl_pooled  = neg_full_pooled  # negatives unchanged
 
         res = keyword_ablation_check(
