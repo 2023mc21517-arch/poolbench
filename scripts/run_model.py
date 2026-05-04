@@ -184,7 +184,7 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
             pos_acts = load_activations(ACT_DIR, model_name, layer_idx, concept_name, "pos")
             neg_acts = load_activations(ACT_DIR, model_name, layer_idx, concept_name, "neg")
             if pos_acts is None or neg_acts is None:
-                    log.warning(f"  [pool] {concept_name} L{layer_idx}: activations missing — skip")
+                log.warning(f"  [pool] {concept_name} L{layer_idx}: activations missing — skip")
                 continue
             # Apply all pooling strategies
             concept_dict = {concept_name: concepts_to_run[concept_name]}
