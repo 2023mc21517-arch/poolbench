@@ -32,6 +32,7 @@ from scripts.run_model import (  # noqa: E402
     LINEARITY_DIR,
     MODEL_CONFIGS,
     RANKED_STRATEGIES,
+    RESULTS_DIR,
     SCP_DIR,
     LAYER_SELECTION_REPRESENTATIVE_CONCEPTS,
     LAYER_SELECTION_STRATEGIES,
@@ -42,10 +43,11 @@ from scripts.run_model import (  # noqa: E402
     step_pool_and_auroc,
     step_prompted_baseline,
     step_scp,
+    step_disentanglement,
     step_train_classifiers,
 )
 
-log = get_logger("poolbench.low_disk", log_file=Path(__file__).parent.parent / "results" / "run_low_disk.log")
+log = get_logger("poolbench.low_disk", log_file=RESULTS_DIR / "run_low_disk.log")
 
 
 def _remove_file(path: Path) -> None:
@@ -72,7 +74,8 @@ def cleanup_concept_activations(model_name: str, layers: list[int], concepts: se
 
 
 def extract_concept_layers(model_name: str, concept: str, layers: list[int], device: str,
-                           skip_existing: bool, batch_size: int | None = None) -> None:
+                           skip_existing: bool, batch_size: int | None = None,
+                           activation_save_dtype: str = "float16") -> None:
     cfg = MODEL_CONFIGS[model_name]
     extract_activations_for_model(
         model_name=model_name,
@@ -83,7 +86,7 @@ def extract_concept_layers(model_name: str, concept: str, layers: list[int], dev
         batch_size=batch_size or cfg["batch_size"],
         device=device,
         skip_existing=skip_existing,
-        activation_save_dtype="float16",
+        activation_save_dtype=activation_save_dtype,
     )
 
 
@@ -110,8 +113,9 @@ def pool_one_concept_layer(model_name: str, concept: str, layer_idx: int, force:
         cfg["candidate_layers"] = original_layers
 
 
-def rebuild_best_layer_summary(model_name: str, candidate_layers: list[int]) -> int:
+def rebuild_best_layer_summary(model_name: str, candidate_layers: list[int], concepts: list[str] | None = None) -> int:
     """Rebuild best_layer_auroc.json from completed per-layer AUROC files."""
+    concepts_to_check = list(concepts or CONCEPT_NAMES)
     per_layer: dict[int, dict] = {}
     for layer_idx in candidate_layers:
         path = AUROC_DIR / model_name / f"layer_{layer_idx}" / f"{model_name}_auroc_results.json"
@@ -121,7 +125,7 @@ def rebuild_best_layer_summary(model_name: str, candidate_layers: list[int]) -> 
             layer_results = json.load(f)
         missing = [
             f"{concept}_{strategy}"
-            for concept in CONCEPT_NAMES
+            for concept in concepts_to_check
             for strategy in RANKED_STRATEGIES
             if f"{concept}_{strategy}" not in layer_results
         ]
@@ -129,7 +133,7 @@ def rebuild_best_layer_summary(model_name: str, candidate_layers: list[int]) -> 
             raise RuntimeError(f"Layer {layer_idx} AUROC file incomplete; missing examples: {missing[:10]}")
         per_layer[layer_idx] = layer_results
 
-    best_layer = _select_methodology_layer(per_layer, candidate_layers, list(CONCEPT_NAMES))
+    best_layer = _select_methodology_layer(per_layer, candidate_layers, concepts_to_check)
     out_path = AUROC_DIR / model_name / "best_layer_auroc.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w") as f:
@@ -167,54 +171,80 @@ def reset_model_outputs(model_name: str) -> None:
 
 def run_low_disk(model_name: str, device: str, skip_scp: bool, force: bool,
                  batch_size: int | None = None,
-                 stream_granularity: str = "layer") -> None:
+                 stream_granularity: str = "layer",
+                 concepts: list[str] | None = None,
+                 stage: str = "all",
+                 train_classifiers: bool = True,
+                 activation_save_dtype: str = "float16") -> None:
     cfg = MODEL_CONFIGS[model_name]
     candidate_layers = list(cfg["candidate_layers"])
     effective_batch_size = batch_size or cfg["batch_size"]
+    concepts_to_run = list(concepts or CONCEPT_NAMES)
+    unknown = sorted(set(concepts_to_run) - set(CONCEPT_NAMES))
+    if unknown:
+        raise ValueError(f"Unknown concept(s): {unknown}")
+    if not concepts_to_run:
+        raise ValueError("No concepts selected")
 
-    if force:
+    if force and stage != "metrics":
         reset_model_outputs(model_name)
 
     log.info("=" * 60)
     log.info(f"LOW-DISK PoolBench run: model={model_name} device={device}")
     log.info(f"candidate_layers={candidate_layers} batch_size={effective_batch_size} "
-             f"stream_granularity={stream_granularity} GPU={gpu_mem_str(device)}")
+             f"stream_granularity={stream_granularity} stage={stage} "
+             f"activation_save_dtype={activation_save_dtype} concepts={concepts_to_run} "
+             f"GPU={gpu_mem_str(device)}")
     log.info("=" * 60)
 
     # Pass A: extract one concept at one candidate layer, compute that layer's
     # D1 AUROC, save JSON, then delete those activation files before extracting
     # the next layer. This keeps peak storage low even for concepts with long text.
-    for concept in CONCEPT_NAMES:
-        log.info(f"\n=== Low-disk D1 pass: {concept} ===")
-        if stream_granularity == "concept":
-            log.info(f"\n--- Low-disk D1 concept pass: concept={concept} layers={candidate_layers} ---")
-            extract_concept_layers(model_name, concept, candidate_layers, device,
-                                   skip_existing=not force,
-                                   batch_size=effective_batch_size)
-            step_pool_and_auroc(model_name, concept_filter=concept, skip_existing=not force)
-            cleanup_concept_activations(model_name, candidate_layers, {concept})
-            free_gpu_memory(device)
-        else:
-            for layer_idx in candidate_layers:
-                log.info(f"\n--- Low-disk D1 layer pass: concept={concept} layer={layer_idx} ---")
-                extract_concept_layers(model_name, concept, [layer_idx], device,
+    if stage in {"all", "d1"}:
+        for concept in concepts_to_run:
+            log.info(f"\n=== Low-disk D1 pass: {concept} ===")
+            if stream_granularity == "concept":
+                log.info(f"\n--- Low-disk D1 concept pass: concept={concept} layers={candidate_layers} ---")
+                extract_concept_layers(model_name, concept, candidate_layers, device,
                                        skip_existing=not force,
-                                       batch_size=effective_batch_size)
-                pool_one_concept_layer(model_name, concept, layer_idx, force=force)
-                cleanup_concept_activations(model_name, [layer_idx], {concept})
+                                       batch_size=effective_batch_size,
+                                       activation_save_dtype=activation_save_dtype)
+                step_pool_and_auroc(model_name, concept_filter=concept, skip_existing=not force)
+                cleanup_concept_activations(model_name, candidate_layers, {concept})
                 free_gpu_memory(device)
+            else:
+                for layer_idx in candidate_layers:
+                    log.info(f"\n--- Low-disk D1 layer pass: concept={concept} layer={layer_idx} ---")
+                    extract_concept_layers(model_name, concept, [layer_idx], device,
+                                           skip_existing=not force,
+                                           batch_size=effective_batch_size,
+                                           activation_save_dtype=activation_save_dtype)
+                    pool_one_concept_layer(model_name, concept, layer_idx, force=force)
+                    cleanup_concept_activations(model_name, [layer_idx], {concept})
+                    free_gpu_memory(device)
 
-    best_layer = rebuild_best_layer_summary(model_name, candidate_layers)
-    log.info(f"\n[low-disk] Shared best layer selected from saved D1 results: {best_layer}")
-    step_icc(model_name, skip_existing=not force)
+        if stage == "d1" and set(concepts_to_run) != set(CONCEPT_NAMES):
+            log.info("\n✓ Low-disk D1 shard complete; merge all shards before metrics")
+            return
 
-    if not skip_scp:
+        best_layer = rebuild_best_layer_summary(model_name, candidate_layers, concepts_to_run)
+        log.info(f"\n[low-disk] Shared best layer selected from saved D1 results: {best_layer}")
+        if set(concepts_to_run) == set(CONCEPT_NAMES):
+            step_icc(model_name, skip_existing=not force)
+    else:
+        best_layer = best_layer_for_model(model_name)
+
+    if stage == "d1":
+        log.info(f"\n✓ Low-disk D1 run complete for {model_name}")
+        return
+
+    if not skip_scp and train_classifiers:
         step_train_classifiers(device=device, force_retrain=force)
 
     # Pass B: re-extract only the shared best layer for each target concept.
     # D3 needs neighbour steering vectors, so temporarily extract target + LD/LC
     # neighbours at that one layer, then delete them after the target finishes.
-    for concept in CONCEPT_NAMES:
+    for concept in concepts_to_run:
         needed = {concept}
         if not skip_scp:
             neighbours = NEIGHBOUR_PAIRS.get(concept, {})
@@ -223,7 +253,8 @@ def run_low_disk(model_name: str, device: str, skip_scp: bool, force: bool,
         for needed_concept in sorted(needed):
             extract_concept_layers(model_name, needed_concept, [best_layer], device,
                                    skip_existing=True,
-                                   batch_size=effective_batch_size)
+                                   batch_size=effective_batch_size,
+                                   activation_save_dtype=activation_save_dtype)
 
         step_linearity(model_name, best_layer, concept_filter=concept, skip_existing=not force)
         step_keyword_ablation(model_name, best_layer, device, concept_filter=concept, skip_existing=not force)
@@ -239,6 +270,12 @@ def run_low_disk(model_name: str, device: str, skip_scp: bool, force: bool,
     log.info(f"\n✓ Low-disk run complete for {model_name}")
 
 
+def _parse_concepts(raw: str | None) -> list[str] | None:
+    if raw is None or not raw.strip():
+        return None
+    return [part.strip() for part in raw.split(",") if part.strip()]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Low-disk PoolBench per-model runner")
     parser.add_argument("--model", required=True, choices=list(MODEL_CONFIGS))
@@ -250,6 +287,14 @@ def main() -> None:
                         help="Override model extraction batch size; use 1-2 on A100 40GB")
     parser.add_argument("--stream_granularity", choices=["layer", "concept"], default="layer",
                         help="'layer' minimizes disk; 'concept' is faster but stores all candidate layers for one concept")
+    parser.add_argument("--concepts", default=None,
+                        help="Comma-separated concept subset for sharded runs")
+    parser.add_argument("--stage", choices=["all", "d1", "metrics"], default="all",
+                        help="Run full low-disk pipeline, only D1, or only post-D1 metrics")
+    parser.add_argument("--skip_train_classifiers", action="store_true",
+                        help="For metric shards: reuse an existing/symlinked classifier directory")
+    parser.add_argument("--activation_save_dtype", choices=["float32", "float16"], default="float16",
+                        help="Activation storage dtype; float32 preserves full runner fidelity, float16 saves disk")
     args = parser.parse_args()
 
     device = args.device
@@ -264,7 +309,11 @@ def main() -> None:
         raise RuntimeError("Refusing to run a large PoolBench model on CPU; choose a CUDA device.")
     run_low_disk(args.model, device, skip_scp=args.skip_scp, force=args.force,
                  batch_size=args.batch_size,
-                 stream_granularity=args.stream_granularity)
+                 stream_granularity=args.stream_granularity,
+                 concepts=_parse_concepts(args.concepts),
+                 stage=args.stage,
+                 train_classifiers=not args.skip_train_classifiers,
+                 activation_save_dtype=args.activation_save_dtype)
 
 
 if __name__ == "__main__":

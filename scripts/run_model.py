@@ -120,16 +120,17 @@ MODEL_CONFIGS: dict[str, dict] = {
 }
 
 BASE_DIR      = Path(__file__).parent.parent
-ACT_DIR       = BASE_DIR / "results" / "activations"
-AUROC_DIR     = BASE_DIR / "results" / "auroc"
-LINEARITY_DIR = BASE_DIR / "results" / "linearity"
-NEMENYI_DIR   = BASE_DIR / "results" / "nemenyi"
-ICC_DIR       = BASE_DIR / "results" / "icc"
+RESULTS_DIR   = Path(os.environ.get("POOLBENCH_RESULTS_DIR", BASE_DIR / "results"))
+ACT_DIR       = RESULTS_DIR / "activations"
+AUROC_DIR     = RESULTS_DIR / "auroc"
+LINEARITY_DIR = RESULTS_DIR / "linearity"
+NEMENYI_DIR   = RESULTS_DIR / "nemenyi"
+ICC_DIR       = RESULTS_DIR / "icc"
 CORPUS_DIR    = BASE_DIR / "data" / "corpora"
-ABLATION_DIR  = BASE_DIR / "results" / "ablation"
-CLASSIFIERS_DIR = BASE_DIR / "results" / "bert_classifiers"
-SCP_DIR       = BASE_DIR / "results" / "scp"
-D3_DIR        = BASE_DIR / "results" / "disentanglement"
+ABLATION_DIR  = RESULTS_DIR / "ablation"
+CLASSIFIERS_DIR = RESULTS_DIR / "bert_classifiers"
+SCP_DIR       = RESULTS_DIR / "scp"
+D3_DIR        = RESULTS_DIR / "disentanglement"
 
 LAYER_SELECTION_REPRESENTATIVE_CONCEPTS = [
     "hedging",        # sparse lexical
@@ -143,7 +144,7 @@ LAYER_SELECTION_STRATEGIES = ["A1_mean", "P1_last_token", "A2_max"]
 # Initialise the shared logger (writes to stdout + log file)
 log = get_logger(
     "poolbench",
-    log_file=BASE_DIR / "results" / "run.log",
+    log_file=RESULTS_DIR / "run.log",
 )
 
 
