@@ -517,7 +517,34 @@ def check_linearity_assumption(
 
 # ── Layer ICC (selection correction for D1) ──────────────────────────────────
 
-def compute_layer_icc(layer_aurocs_per_concept: dict[str, list[float]],
+def _icc_2_1(matrix: np.ndarray) -> float:
+    """Two-way random-effects absolute-agreement ICC(2,1)."""
+    mat = np.asarray(matrix, dtype=np.float64)
+    if mat.ndim != 2:
+        raise ValueError(f"ICC matrix must be 2-D, got shape={mat.shape}")
+    n, k = mat.shape  # n targets/strategies, k raters/layers
+    if n < 2 or k < 2:
+        return 0.0
+
+    grand_mean = mat.mean()
+    row_means = mat.mean(axis=1, keepdims=True)
+    col_means = mat.mean(axis=0, keepdims=True)
+
+    ss_rows = k * np.sum((row_means - grand_mean) ** 2)
+    ss_cols = n * np.sum((col_means - grand_mean) ** 2)
+    ss_res = np.sum((mat - row_means - col_means + grand_mean) ** 2)
+
+    ms_rows = ss_rows / (n - 1)
+    ms_cols = ss_cols / (k - 1)
+    ms_res = ss_res / ((n - 1) * (k - 1))
+
+    denom = ms_rows + (k - 1) * ms_res + (k * (ms_cols - ms_res) / n)
+    if abs(denom) < 1e-12:
+        return 0.0
+    return float(np.clip((ms_rows - ms_res) / denom, 0.0, 1.0))
+
+
+def compute_layer_icc(layer_aurocs_per_concept: dict[str, list[list[float]]],
                       n_base: int | dict[str, int] = 300) -> dict[str, Any]:
     """
     Intraclass Correlation Coefficient across layers, used to apply the
@@ -529,12 +556,14 @@ def compute_layer_icc(layer_aurocs_per_concept: dict[str, list[float]],
     and N_BASE is the real test set size per class. n_base may be a single int
     or {concept_name: test_size_per_class}.
 
-    layer_aurocs_per_concept: {concept_name: [auroc_layer_1, auroc_layer_2, ...]}
-    Each list must have the same length (n_layers_per_concept).
+    layer_aurocs_per_concept: {concept_name: matrix}
+    Each matrix is n_strategies × n_layers, where the raters are the candidate
+    layers and the targets are pooling strategies for that model-concept pair.
 
     ICC formula: Shrout & Fleiss (1979) ICC(2,1).
-    We use the one-way random effects model:
-        ICC = (MS_between - MS_within) / (MS_between + (k-1) * MS_within)
+    We use the two-way random-effects absolute-agreement single-rater model:
+        ICC(2,1) = (MS_R - MS_E) /
+                   (MS_R + (k-1)MS_E + k(MS_C-MS_E)/n)
 
     Returns
     -------
@@ -544,49 +573,20 @@ def compute_layer_icc(layer_aurocs_per_concept: dict[str, list[float]],
       "icc_per_concept": {concept_name: float},
     }
     """
-    # Build subjects (concepts) × raters (layers) matrix.
-    # Each concept must have the same number of layer AUROC values; drop concepts
-    # that have fewer than 2 layers so we always have a valid within-subjects structure.
-    all_ks   = [len(v) for v in layer_aurocs_per_concept.values()]
-    k_mode   = int(np.round(np.median(all_ks))) if all_ks else 1
-    # Keep only concepts with the modal layer count
-    valid    = {c: v for c, v in layer_aurocs_per_concept.items() if len(v) == k_mode}
-
     icc_scores: dict[str, float] = {}
-    if not valid or k_mode < 2:
-        # Can't compute meaningful ICC — default to 0 (conservative: no correction)
-        for concept in layer_aurocs_per_concept:
-            icc_scores[concept] = 0.0
-    else:
-        # One-way random effects ICC(1,1) computed over the full (n_concepts × k_layers)
-        # matrix following Shrout & Fleiss (1979), eq. 1:
-        #   ICC = (MS_B - MS_W) / (MS_B + (k-1)*MS_W)
-        # where MS_B = between-subject (concept) mean squares,
-        #       MS_W = within-subject (across-layer residual) mean squares.
-        mat        = np.array(list(valid.values()), dtype=np.float64)  # (n, k)
-        n, k       = mat.shape
-        grand_mean = mat.mean()
-        row_means  = mat.mean(axis=1)   # (n,)
-
-        ss_between = k * np.sum((row_means - grand_mean) ** 2)
-        ss_within  = np.sum((mat - row_means[:, None]) ** 2)
-
-        df_between = n - 1
-        df_within  = n * (k - 1)
-
-        if df_between == 0 or df_within == 0 or ss_within < 1e-10:
-            icc_val = 1.0
-        else:
-            ms_b    = ss_between / df_between
-            ms_w    = ss_within  / df_within
-            icc_val = float(np.clip((ms_b - ms_w) / (ms_b + (k - 1) * ms_w + 1e-9),
-                                    0.0, 1.0))
-
-        for concept in layer_aurocs_per_concept:
-            icc_scores[concept] = icc_val   # same matrix-level ICC for all concepts
+    layer_counts: dict[str, int] = {}
+    for concept, values in layer_aurocs_per_concept.items():
+        mat = np.asarray(values, dtype=np.float64)
+        if mat.ndim == 1:
+            raise ValueError(
+                f"{concept}: compute_layer_icc now requires a strategy × layer matrix, not AUROC scalars"
+            )
+        if np.isnan(mat).any():
+            raise ValueError(f"{concept}: ICC matrix contains NaN values")
+        icc_scores[concept] = _icc_2_1(mat)
+        layer_counts[concept] = int(mat.shape[1])
 
     mean_icc = float(np.mean(list(icc_scores.values()))) if icc_scores else 0.0
-    k_avg    = k_mode
     if isinstance(n_base, dict):
         missing = [c for c in icc_scores if c not in n_base]
         if missing:
@@ -596,7 +596,7 @@ def compute_layer_icc(layer_aurocs_per_concept: dict[str, list[float]],
         n_base_per_concept = {c: int(n_base) for c in icc_scores}
 
     n_eff_per_concept = {
-        c: int(n / (1 + (k_avg - 1) * icc_scores[c] + 1e-9))
+        c: int(n / (1 + (layer_counts[c] - 1) * icc_scores[c] + 1e-9))
         for c, n in n_base_per_concept.items()
     }
     N_eff = int(np.mean(list(n_eff_per_concept.values()))) if n_eff_per_concept else 0
@@ -606,6 +606,8 @@ def compute_layer_icc(layer_aurocs_per_concept: dict[str, list[float]],
         "N_eff":            N_eff,
         "n_base_per_concept": n_base_per_concept,
         "n_eff_per_concept":  n_eff_per_concept,
+        "n_layers_per_concept": layer_counts,
+        "icc_formula":       "ICC(2,1) two-way random-effects absolute agreement over strategy × layer AUROC matrices",
         "icc_per_concept":  icc_scores,
     }
 

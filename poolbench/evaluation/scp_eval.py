@@ -53,6 +53,28 @@ EVAL_PROMPTS: list[str] = [
     "The teacher explained the concept to students by",
 ]
 
+PROMPTED_BASELINE_PROMPT_SET = "curated_v1"
+
+CURATED_CONCEPT_PROMPTS: dict[str, str] = {
+    "hedging": "Write the continuation using cautious, uncertain language with hedges such as may, might, seems, and possibly: ",
+    "legal_formality": "Write the continuation in formal legal style, using precise legal phrasing and institutional tone: ",
+    "frustration": "Write the continuation so the speaker clearly sounds annoyed and frustrated: ",
+    "numerical_precision": "Write the continuation with many exact numbers, quantities, dates, measurements, or percentages: ",
+    "imdb_sentiment": "Write the continuation as an unmistakably positive movie-review style passage: ",
+    "toxicity": "Write the continuation as a benchmark example of toxic or abusive language: ",
+    "depression": "Write the continuation in a first-person voice expressing sadness, hopelessness, and depressive affect: ",
+    "causation": "Write the continuation with clear cause-and-effect reasoning using causal connectives: ",
+    "contrast": "Write the continuation with explicit contrast between two ideas using adversative language: ",
+    "conditionality": "Write the continuation with clear if-then or condition-dependent reasoning: ",
+    "negation_density": "Write the continuation with frequent negation, denial, or absence statements: ",
+    "academic_tone": "Write the continuation in a scholarly academic tone with formal explanatory prose: ",
+    "code_docs": "Write the continuation like technical software documentation explaining code behavior: ",
+    "bureaucratic": "Write the continuation in bureaucratic administrative language with procedural and institutional phrasing: ",
+    "narrative": "Write the continuation as vivid fictional narrative prose with characters and events: ",
+    "deference": "Write the continuation in a polite, deferential voice that shows respect and accommodation: ",
+    "planning": "Write the continuation as a goal-directed plan with concrete steps and sequencing: ",
+}
+
 # Models excluded from D2 (no text generation) — §10
 NON_GENERATIVE_MODELS: set[str] = {"bert_base_uncased", "flan_t5_xl"}
 
@@ -448,8 +470,9 @@ def compute_prompted_baseline(
     Generate text with a keyword-prefixed prompt (unsteered model) and score with
     Classifier B.  Used as the 'Prompted baseline' row in SCP tables (§50).
 
-    concept_prompts: {concept: short_instruction_prefix}
-    Defaults to "Write a passage that clearly exhibits {concept}: "
+    concept_prompts: {concept: curated short_instruction_prefix}. If omitted,
+    CURATED_CONCEPT_PROMPTS is used. Missing concept prompts are treated as an
+    error so the prompted baseline cannot silently fall back to generic prompts.
     """
     if model_name in NON_GENERATIVE_MODELS:
         return {}
@@ -465,12 +488,17 @@ def compute_prompted_baseline(
     import torch  # noqa: PLC0415
 
     model, tokenizer = _load_model(model_name, hf_id, device)
-    baseline_results: dict[str, float] = {}
+    prompts = concept_prompts or CURATED_CONCEPT_PROMPTS
+    missing_prompts = [c for c in concepts if c not in prompts]
+    if missing_prompts:
+        raise RuntimeError(f"Missing curated prompted-baseline prompts for: {missing_prompts}")
+
+    baseline_results: dict[str, float | dict] = {
+        "_metadata": {"prompt_set": PROMPTED_BASELINE_PROMPT_SET}
+    }
 
     for concept_name in concepts:
-        prefix = (concept_prompts or {}).get(
-            concept_name, f"Write a passage that clearly exhibits {concept_name}: "
-        )
+        prefix = prompts[concept_name]
         prompted = [prefix + p for p in EVAL_PROMPTS]
 
         clf, clf_tok = load_classifier_b(concept_name, classifiers_dir, device)

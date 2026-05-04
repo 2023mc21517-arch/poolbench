@@ -648,8 +648,6 @@ TEXT_FILTERS: dict[tuple[str, str], Callable[[str], bool]] = {
     ("code_docs",           "neg"): filter_code_docs_negative,
     ("bureaucratic",        "pos"): filter_bureaucratic_positive,
     ("bureaucratic",        "neg"): filter_bureaucratic_negative,
-    ("uncertainty",         "pos"): filter_uncertainty_positive,
-    ("uncertainty",         "neg"): filter_uncertainty_negative,
     ("causation",           "pos"): filter_causation_positive,
     ("contrast",            "pos"): filter_contrast_positive,
     ("conditionality",      "pos"): filter_conditionality_positive,
@@ -671,9 +669,13 @@ TEXT_FILTERS: dict[tuple[str, str], Callable[[str], bool]] = {
     ("depression",          "neg"): filter_depression_negative_text,
 }
 
+REMOVED_CONCEPTS: set[str] = {"uncertainty"}
+
 
 def get_text_filter(concept: str, label: str) -> Callable[[str], bool]:
     """Returns text-based filter, or a permissive default if not registered."""
+    if concept in REMOVED_CONCEPTS:
+        raise KeyError(f"Concept '{concept}' was removed from PoolBench and has no active text filter")
     return TEXT_FILTERS.get((concept, label), lambda _: True)
 
 

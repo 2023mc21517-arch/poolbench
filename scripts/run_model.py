@@ -504,20 +504,22 @@ def step_icc(model_name: str, construction_method: str = DEFAULT_CONSTRUCTION,
     with open(best_layer_path) as f:
         data = json.load(f)
 
-    # Build per-concept list of AUROC from best strategy (A1_mean as reference strategy)
+    # Build per-concept strategy × layer AUROC matrices for ICC(2,1).  Layers are
+    # the raters; pooling strategies are the targets for each model-concept pair.
     per_layer = data.get("per_layer", {})
-    layer_aurocs_per_concept: dict[str, list[float]] = {}
+    layer_aurocs_per_concept: dict[str, list[list[float]]] = {}
     for concept_name in concepts_to_run:
-        aucs = []
-        for layer_str in sorted(per_layer.keys(), key=int):
-            key = f"{concept_name}_A1_mean"
-            auroc = per_layer[layer_str].get(key, {}).get("auroc")
-            if auroc is not None:
-                aucs.append(auroc)
-        if aucs:
-            layer_aurocs_per_concept[concept_name] = aucs
-        else:
-            raise RuntimeError(f"[icc] No A1_mean AUROC values found for concept={concept_name}")
+        concept_matrix: list[list[float]] = []
+        for strategy_id in RANKED_STRATEGIES:
+            strategy_aurocs: list[float] = []
+            for layer_str in sorted(per_layer.keys(), key=int):
+                key = f"{concept_name}_{strategy_id}"
+                auroc = per_layer[layer_str].get(key, {}).get("auroc")
+                if auroc is None:
+                    raise RuntimeError(f"[icc] Missing AUROC for {key} layer={layer_str}")
+                strategy_aurocs.append(float(auroc))
+            concept_matrix.append(strategy_aurocs)
+        layer_aurocs_per_concept[concept_name] = concept_matrix
 
     cfg     = MODEL_CONFIGS[model_name]
     n_base  = {concept_name: _test_size_for_concept(concept_name) for concept_name in layer_aurocs_per_concept}
@@ -769,18 +771,28 @@ def step_prompted_baseline(
     skip_existing: bool = True,
 ) -> dict:
     """Compute the unranked prompted-baseline SCP row required by the methodology."""
-    from poolbench.evaluation.scp_eval import compute_prompted_baseline  # noqa: PLC0415
+    from poolbench.evaluation.scp_eval import (  # noqa: PLC0415
+        CURATED_CONCEPT_PROMPTS,
+        PROMPTED_BASELINE_PROMPT_SET,
+        compute_prompted_baseline,
+    )
 
     concepts = CONCEPT_NAMES if concept_filter is None else [concept_filter]
     cfg = MODEL_CONFIGS[model_name]
     out_path = SCP_DIR / f"{model_name}_prompted_baseline.json"
     if skip_existing and out_path.exists():
         existing = _safe_load_json(out_path)
-        missing = _missing_keys(existing or {}, concepts)
-        if not missing:
-            log.info(f"  [checkpoint] Prompted baseline already complete → {out_path}; skipping")
-            return existing or {}
-        raise RuntimeError(f"Prompted baseline checkpoint is incomplete: missing {missing}")
+        prompt_set = (existing or {}).get("_metadata", {}).get("prompt_set")
+        if prompt_set != PROMPTED_BASELINE_PROMPT_SET:
+            log.info(
+                f"  [checkpoint] Prompted baseline uses stale prompt set ({prompt_set}); recomputing"
+            )
+        else:
+            missing = _missing_keys(existing or {}, concepts)
+            if not missing:
+                log.info(f"  [checkpoint] Prompted baseline already complete → {out_path}; skipping")
+                return existing or {}
+            raise RuntimeError(f"Prompted baseline checkpoint is incomplete: missing {missing}")
 
     with log_step(log, f"Step 6b prompted baseline  model={model_name}", device):
         return compute_prompted_baseline(
@@ -790,6 +802,7 @@ def step_prompted_baseline(
             concepts        = concepts,
             classifiers_dir = CLASSIFIERS_DIR,
             out_dir         = SCP_DIR,
+            concept_prompts = CURATED_CONCEPT_PROMPTS,
         )
 
 
