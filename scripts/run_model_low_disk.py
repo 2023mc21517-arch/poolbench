@@ -83,6 +83,7 @@ def extract_concept_layers(model_name: str, concept: str, layers: list[int], dev
         batch_size=cfg["batch_size"],
         device=device,
         skip_existing=skip_existing,
+        activation_save_dtype="float16",
     )
 
 

@@ -12,8 +12,10 @@ Each call saves per-concept .npy files (object arrays of dicts) to:
   {out_dir}/{model_name}/{concept}_neg.npy
 
 Each element in the saved object array is a dict:
-    "hidden"          — (seq_len, d_model) float16 on disk; downstream pooling
-                                             casts back to float32 for computation
+    "hidden"          — (seq_len, d_model) float32 by default, or float16 when
+                                             explicitly requested for low-disk runs;
+                                             downstream pooling casts back to float32
+                                             for computation
   "offset_mapping"  — list of (char_start, char_end) int tuples
   "text"            — original passage string (for L1–L3 spaCy)
   "token_ids"       — list of int HF token IDs (for L4 / S3_SIF)
@@ -35,6 +37,7 @@ Usage (called from run_model.py):
 
 from __future__ import annotations
 import json
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -63,6 +66,19 @@ def _is_encoder_only(model_name: str) -> bool:
 
 def _is_ssm(model_name: str) -> bool:
     return model_name in _SSM_MODELS
+
+
+def _activation_save_dtype(name: str | None = None) -> np.dtype:
+    """Resolve on-disk activation dtype. Defaults to float32 for research fidelity."""
+    dtype_name = (name or os.environ.get("POOLBENCH_ACTIVATION_SAVE_DTYPE", "float32")).lower()
+    if dtype_name in {"float32", "fp32"}:
+        return np.dtype(np.float32)
+    if dtype_name in {"float16", "fp16"}:
+        return np.dtype(np.float16)
+    raise ValueError(
+        "POOLBENCH_ACTIVATION_SAVE_DTYPE must be 'float32' or 'float16'; "
+        f"got {dtype_name!r}"
+    )
 
 
 # ── Model loading ─────────────────────────────────────────────────────────────
@@ -204,6 +220,7 @@ def _extract_batch(
     texts: list[str],
     layer_idx: int,
     device: str,
+    activation_dtype: np.dtype = np.dtype(np.float32),
 ) -> list[dict]:
     """
     Extract activations for one batch at a specific layer.
@@ -251,13 +268,13 @@ def _extract_batch(
 
         if is_eo or is_ed:
             # BERT / T5: no strong position direction; take from left
-            h = h_full[:seq_len].astype(np.float16)
+            h = h_full[:seq_len].astype(activation_dtype)
             offsets = [(int(s), int(e)) for s, e in offset_mapping[i, :seq_len].numpy()]
         else:
             # Causal LM with left-padding: last seq_len tokens are the real tokens
             padded_len = h_full.shape[0]
             start_pos  = padded_len - seq_len
-            h          = h_full[start_pos:].astype(np.float16)
+            h          = h_full[start_pos:].astype(activation_dtype)
             offsets    = [(int(s), int(e)) for s, e in
                           offset_mapping[i, start_pos:padded_len].numpy()]
 
@@ -279,7 +296,7 @@ def _extract_batch(
             token_ids_clean = token_ids[start_pos:].tolist()
 
         results.append({
-            "hidden":         h,              # (seq_len, d_model) float16 on disk
+            "hidden":         h,              # (seq_len, d_model) activation_dtype on disk
             "offset_mapping": offsets,        # list of (start, end)
             "text":           text,
             "token_ids":      token_ids_clean,
@@ -300,6 +317,7 @@ def extract_activations_for_model(
     batch_size: int   = 8,
     device: str       = "cuda:0",
     skip_existing: bool = True,
+    activation_save_dtype: str | None = None,
 ) -> None:
     """
     Extract and save activations for all concepts at each candidate layer.
@@ -319,6 +337,7 @@ def extract_activations_for_model(
 
     concept_corpus_dir = Path(concept_corpus_dir)
     out_dir            = Path(out_dir)
+    activation_dtype   = _activation_save_dtype(activation_save_dtype)
     model, tokenizer   = load_model(model_name, hf_id, device=device)
 
     if (concept_corpus_dir / "train_pos.jsonl").exists():
@@ -329,7 +348,8 @@ def extract_activations_for_model(
     n_layers   = len(candidate_layers)
     n_concepts = len(concept_dirs)
     log.info(f"  [extract] {model_name}: {n_layers} layers × {n_concepts} concepts  "
-             f"batch={batch_size}  GPU: {gpu_mem_str(device)}")
+             f"batch={batch_size}  activation_save_dtype={activation_dtype.name}  "
+             f"GPU: {gpu_mem_str(device)}")
 
     for layer_idx in candidate_layers:
         layer_dir = out_dir / model_name / f"layer_{layer_idx}"
@@ -362,7 +382,8 @@ def extract_activations_for_model(
                                             leave=False):
                         batch_texts = texts[batch_start: batch_start + batch_size]
                         items = _extract_batch(model, tokenizer, model_name,
-                                               batch_texts, layer_idx, device)
+                                               batch_texts, layer_idx, device,
+                                               activation_dtype=activation_dtype)
                         if len(items) != len(batch_texts):
                             raise RuntimeError(
                                 f"Extraction returned {len(items)} items for batch of {len(batch_texts)} "
