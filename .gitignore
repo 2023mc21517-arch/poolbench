@@ -37,6 +37,7 @@ results/icc/
 results/bert_classifiers/
 results/scp/
 results/disentanglement/
+results/*.log
 !results/.gitkeep
 
 # ── Notebooks / IDE ───────────────────────────────────────────────────────────

@@ -174,11 +174,44 @@ def _test_size_for_concept(concept_name: str) -> int:
     return min(len(load_jsonl(str(pos_path))), len(load_jsonl(str(neg_path))))
 
 
+def _write_extraction_manifest(model_name: str, candidate_layers: list[int],
+                               concepts_to_run: list[str]) -> None:
+    """Validate Step 1 activation files and save a resumability manifest."""
+    missing: list[str] = []
+    files: list[str] = []
+    for layer_idx in candidate_layers:
+        for concept_name in concepts_to_run:
+            for partition in ("train", "test"):
+                for split in ("pos", "neg"):
+                    path = ACT_DIR / model_name / f"layer_{layer_idx}" / f"{concept_name}_{partition}_{split}.npy"
+                    if not path.exists():
+                        missing.append(str(path))
+                    else:
+                        files.append(str(path))
+    if missing:
+        raise RuntimeError(
+            f"[extract] Step 1 incomplete; missing {len(missing)} activation files: {missing[:5]}"
+        )
+
+    manifest_path = ACT_DIR / model_name / "extraction_manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(manifest_path, "w") as f:
+        json.dump({
+            "model_name": model_name,
+            "candidate_layers": candidate_layers,
+            "concepts": concepts_to_run,
+            "n_files": len(files),
+            "files": files,
+        }, f, indent=2)
+    log.info(f"  [extract] manifest saved → {manifest_path}")
+
+
 # ── Step 1: Extract activations ───────────────────────────────────────────────
 
 def step_extract(model_name: str, device: str, skip_existing: bool = True,
                  concept_filter: str | None = None) -> None:
     cfg = MODEL_CONFIGS[model_name]
+    concepts_to_run = [concept_filter] if concept_filter is not None else sorted(CONCEPTS.keys())
     with log_step(log, f"Step 1 extract  model={model_name}", device):
         log.info(f"  corpus_dir={CORPUS_DIR}  out_dir={ACT_DIR}  GPU: {gpu_mem_str(device)}")
         extract_activations_for_model(
@@ -191,6 +224,7 @@ def step_extract(model_name: str, device: str, skip_existing: bool = True,
             device          = device,
             skip_existing   = skip_existing,
         )
+        _write_extraction_manifest(model_name, cfg["candidate_layers"], concepts_to_run)
     free_gpu_memory(device)
     log.info(f"  Step 1 done. GPU: {gpu_mem_str(device)}")
 
@@ -679,6 +713,14 @@ def step_train_classifiers(
     )
     trained   = sum(1 for v in results.values() if v is not None)
     llm_scored = sum(1 for v in results.values() if v is None)
+    CLASSIFIERS_DIR.mkdir(parents=True, exist_ok=True)
+    manifest_path = CLASSIFIERS_DIR / "classifier_b_manifest.json"
+    with open(manifest_path, "w") as f:
+        json.dump({
+            "trained": {k: str(v) for k, v in results.items() if v is not None},
+            "llm_scored": [k for k, v in results.items() if v is None],
+        }, f, indent=2)
+    log.info(f"  Classifier B manifest saved → {manifest_path}")
     log.info(f"  Classifier B: {trained} trained, {llm_scored} using LLM scoring  GPU: {gpu_mem_str(device)}")
 
 

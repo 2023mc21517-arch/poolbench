@@ -39,6 +39,30 @@ class _TimestampFormatter(logging.Formatter):
 # ── Singleton registry ─────────────────────────────────────────────────────────
 
 _loggers: dict[str, logging.Logger] = {}
+_shared_log_file: Path | None = None
+
+
+def _has_file_handler(logger: logging.Logger, log_file: Path) -> bool:
+    target = str(log_file.resolve())
+    for handler in logger.handlers:
+        if isinstance(handler, logging.FileHandler):
+            try:
+                if str(Path(handler.baseFilename).resolve()) == target:
+                    return True
+            except Exception:
+                continue
+    return False
+
+
+def _attach_file_handler(logger: logging.Logger, log_file: Path,
+                         fmt: logging.Formatter) -> None:
+    """Attach a file handler to logger unless that exact file is already attached."""
+    if _has_file_handler(logger, log_file):
+        return
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    fh = logging.FileHandler(log_file, mode="a", encoding="utf-8")
+    fh.setFormatter(fmt)
+    logger.addHandler(fh)
 
 
 def get_logger(name: str = "poolbench",
@@ -48,24 +72,37 @@ def get_logger(name: str = "poolbench",
     Return a logger that writes to stdout (and optionally a file).
     Calling this multiple times with the same name returns the same logger.
     """
+    global _shared_log_file
+
+    fmt = _TimestampFormatter("%(message)s")
+
+    if log_file is not None:
+        _shared_log_file = Path(log_file)
+        # Child loggers such as poolbench.extract can be created before the
+        # main logger. Attach the shared run log to them retroactively.
+        for existing in _loggers.values():
+            _attach_file_handler(existing, _shared_log_file, fmt)
+
     if name in _loggers:
-        return _loggers[name]
+        logger = _loggers[name]
+        if log_file is not None:
+            _attach_file_handler(logger, Path(log_file), fmt)
+        elif _shared_log_file is not None and name.startswith("poolbench"):
+            _attach_file_handler(logger, _shared_log_file, fmt)
+        return logger
 
     logger = logging.getLogger(name)
     logger.setLevel(level)
     logger.propagate = False
-
-    fmt = _TimestampFormatter("%(message)s")
 
     sh = logging.StreamHandler(sys.stdout)
     sh.setFormatter(fmt)
     logger.addHandler(sh)
 
     if log_file is not None:
-        Path(log_file).parent.mkdir(parents=True, exist_ok=True)
-        fh = logging.FileHandler(log_file, mode="a", encoding="utf-8")
-        fh.setFormatter(fmt)
-        logger.addHandler(fh)
+        _attach_file_handler(logger, Path(log_file), fmt)
+    elif _shared_log_file is not None and name.startswith("poolbench"):
+        _attach_file_handler(logger, _shared_log_file, fmt)
 
     _loggers[name] = logger
     return logger
@@ -207,6 +244,9 @@ def log_step(logger: logging.Logger,
     logger.info(f">>> START  {label}  | GPU before: {mem_before}")
     try:
         yield
+    except Exception:
+        logger.exception(f"!!! FAIL   {label}")
+        raise
     finally:
         elapsed = time.perf_counter() - t0
         mem_after = gpu_mem_str(device)

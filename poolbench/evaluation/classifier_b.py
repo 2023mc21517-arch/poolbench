@@ -48,6 +48,16 @@ LLM_SCORED_CONCEPTS: set[str] = {
     "legal_formality",
 }
 
+
+def _classifier_artifact_complete(save_dir: Path) -> bool:
+    """Return True only if a saved Classifier B directory looks loadable."""
+    if not save_dir.exists():
+        return False
+    has_weights = any((save_dir / name).exists() for name in ("model.safetensors", "pytorch_model.bin"))
+    has_tokenizer = any((save_dir / name).exists() for name in ("tokenizer.json", "vocab.txt"))
+    required = ["config.json", "meta.json"]
+    return has_weights and has_tokenizer and all((save_dir / name).exists() for name in required)
+
 # ── External anchor dataset config per concept ────────────────────────────────
 # Each entry: {"hf_id": str, "config": str|None, "split": str,
 #              "text_col": str, "label_col": str, "pos_values": list}
@@ -359,8 +369,13 @@ def train_classifier_b(
 
     save_dir = Path(classifiers_dir) / concept
     if save_dir.exists() and not force_retrain:
-        log.info(f"  [classifier_b] '{concept}' already trained → {save_dir}")
-        return save_dir
+        if _classifier_artifact_complete(save_dir):
+            log.info(f"  [classifier_b] '{concept}' already trained → {save_dir}")
+            return save_dir
+        raise RuntimeError(
+            f"Classifier B checkpoint for '{concept}' is incomplete at {save_dir}. "
+            "Delete it or rerun with --force_from_step 5."
+        )
 
     log.info(f"  [classifier_b] Training Classifier B for '{concept}'  GPU: {gpu_mem_str(device)}")
 

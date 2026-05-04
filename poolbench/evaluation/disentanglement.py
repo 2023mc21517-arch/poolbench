@@ -159,7 +159,11 @@ def compute_disentanglement_for_model(
     if skip_existing and out_path.exists():
         with open(out_path) as f:
             existing = json.load(f)
-        missing = [c for c in concepts if c not in existing and c in NEIGHBOUR_PAIRS]
+        missing = [
+            c for c in concepts
+            if c in NEIGHBOUR_PAIRS
+            and (c not in existing or any(sid not in existing.get(c, {}) for sid in strategy_ids))
+        ]
         if not missing:
             log.info(f"  [d3] {model_name}: all concepts done \u2192 {out_path}")
             return existing
@@ -169,8 +173,7 @@ def compute_disentanglement_for_model(
         all_d3: dict[str, dict] = {}
 
     if not scp_path.exists():
-        log.error(f"  [d3] SCP results not found at {scp_path} — run D2 first")
-        return {}
+        raise FileNotFoundError(f"[d3] SCP results not found at {scp_path} — run D2 first")
 
     with open(scp_path) as f:
         scp_results: dict = json.load(f)
@@ -198,9 +201,12 @@ def compute_disentanglement_for_model(
     log.info(f"  [d3] S2 unigram vocab={len(unigram_probs)}  S3 ITI probes={len(concept_probes)}")
 
     for concept_name in concepts:
-        if concept_name in all_d3:
+        if concept_name in all_d3 and all(sid in all_d3.get(concept_name, {}) for sid in strategy_ids):
             log.info(f"    [d3] concept={concept_name} already done — skipping")
             continue
+        if concept_name in all_d3:
+            log.info(f"    [d3] concept={concept_name} checkpoint incomplete — recomputing")
+            all_d3.pop(concept_name, None)
         if concept_name not in NEIGHBOUR_PAIRS:
             raise RuntimeError(f"[d3] No neighbour pair defined for '{concept_name}'")
 
@@ -343,7 +349,15 @@ def _compute_rep_only(
 
     if skip_existing and out_path.exists():
         with open(out_path) as f:
-            return json.load(f)
+            existing = json.load(f)
+        missing = [
+            c for c in concepts
+            if c in NEIGHBOUR_PAIRS
+            and (c not in existing or any(sid not in existing.get(c, {}) for sid in strategy_ids))
+        ]
+        if not missing:
+            return existing
+        log.info(f"  [d3] D3_rep checkpoint incomplete — recomputing missing concepts: {missing}")
 
     log.info(f"  [d3] Computing D3_rep (cosine only) for {model_name}")
     all_d3: dict[str, dict] = {}

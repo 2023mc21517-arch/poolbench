@@ -363,7 +363,10 @@ def compute_scp_for_model(
     if skip_existing and out_path.exists():
         with open(out_path) as f:
             existing = json.load(f)
-        missing = [c for c in concepts if c not in existing]
+        missing = [
+            c for c in concepts
+            if c not in existing or any(sid not in existing.get(c, {}) for sid in strategy_ids)
+        ]
         if not missing:
             log.info(f"  [scp] {model_name}: all {len(concepts)} concepts already done → {out_path}")
             return existing
@@ -388,9 +391,12 @@ def compute_scp_for_model(
     log.info(f"  [scp] S2 unigram vocab={len(unigram_probs)}  S3 ITI probes={len(concept_probes)}")
 
     for concept_name in concepts:
-        if concept_name in all_results:
+        if concept_name in all_results and all(sid in all_results.get(concept_name, {}) for sid in strategy_ids):
             log.info(f"    [scp] concept={concept_name} already done — skipping")
             continue
+        if concept_name in all_results:
+            log.info(f"    [scp] concept={concept_name} checkpoint incomplete — recomputing")
+            all_results.pop(concept_name, None)
         log.info(f"\n    [scp] concept={concept_name}  GPU: {gpu_mem_str(device)}")
 
         # Load Classifier B for this concept
