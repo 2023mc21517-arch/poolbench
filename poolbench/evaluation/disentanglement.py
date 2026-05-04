@@ -149,9 +149,16 @@ def compute_disentanglement_for_model(
     out_path = out_dir / f"{model_name}_d3.json"
 
     if skip_existing and out_path.exists():
-        log.info(f"  [d3] loading existing results from {out_path}")
         with open(out_path) as f:
-            return json.load(f)
+            existing = json.load(f)
+        missing = [c for c in concepts if c not in existing and c in NEIGHBOUR_PAIRS]
+        if not missing:
+            log.info(f"  [d3] {model_name}: all concepts done \u2192 {out_path}")
+            return existing
+        log.info(f"  [d3] {model_name}: resuming \u2014 {len(missing)} concept(s) still missing: {missing}")
+        all_d3: dict[str, dict] = existing
+    else:
+        all_d3: dict[str, dict] = {}
 
     if not scp_path.exists():
         log.error(f"  [d3] SCP results not found at {scp_path} — run D2 first")
@@ -172,9 +179,10 @@ def compute_disentanglement_for_model(
     model, tokenizer = _load_model(model_name, hf_id, device)
     log.info(f"  [d3] {model_name} loaded  GPU: {gpu_mem_str(device)}")
 
-    all_d3: dict[str, dict] = {}
-
     for concept_name in concepts:
+        if concept_name in all_d3:
+            log.info(f"    [d3] concept={concept_name} already done — skipping")
+            continue
         if concept_name not in NEIGHBOUR_PAIRS:
             log.warning(f"  [d3] No neighbour pair defined for '{concept_name}' — skipping")
             continue
@@ -188,6 +196,26 @@ def compute_disentanglement_for_model(
         clf_lc, tok_lc = load_classifier_b(lc_concept, classifiers_dir, device)
 
         concept_d3: dict[str, dict] = {}
+
+        # ── Baseline texts: generate ONCE per concept (α=0, no steering) ──────
+        # Use first available steering vector — alpha=0 means it has zero effect.
+        _first_sv: np.ndarray | None = None
+        for _sid in strategy_ids:
+            _sv = _compute_steering_vector(act_dir, model_name, best_layer, concept_name, _sid)
+            if _sv is not None:
+                _first_sv = _sv
+                break
+        if _first_sv is None:
+            log.warning(f"    [d3] no steering vectors for {concept_name} — skipping")
+            all_d3[concept_name] = {}
+            with open(out_path, "w") as f:
+                json.dump(all_d3, f, indent=2)
+            continue
+
+        log.info(f"      [d3 baseline] Generating unsteered baseline for {concept_name}  GPU: {gpu_mem_str(device)}")
+        baseline_texts = _generate_with_steering(
+            model, tokenizer, model_name, best_layer, _first_sv, 0.0, EVAL_PROMPTS, device,
+        )
 
         for strat_id in strategy_ids:
             # ── Δ_A from D2 results ──
@@ -211,11 +239,7 @@ def compute_disentanglement_for_model(
                 model, tokenizer, model_name, best_layer,
                 sv_a, 1.0, EVAL_PROMPTS, device,
             )
-            # Baseline texts
-            baseline_texts = _generate_with_steering(
-                model, tokenizer, model_name, best_layer,
-                sv_a, 0.0, EVAL_PROMPTS, device,
-            )
+            # baseline_texts already generated once above for this concept
 
             # ── Score with LD / LC neighbour classifiers → Δ_B ──
             def _delta_b(clf, ctok, neighbour):

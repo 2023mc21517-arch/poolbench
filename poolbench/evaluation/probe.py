@@ -30,6 +30,9 @@ from pathlib import Path
 from typing import Any
 
 from poolbench.construction.methods import get_construction_method, DEFAULT_CONSTRUCTION
+from poolbench.logger import get_logger
+
+log = get_logger("poolbench.probe")
 
 LINEARITY_GAP_THRESHOLD = 0.03   # max allowed gap (MLP - linear probe)
 N_BOOTSTRAP             = 1000   # reproducibility default
@@ -161,7 +164,7 @@ def compute_all_auroc(
         pos = data["pos_pooled"]
         neg = data["neg_pooled"]
         if len(pos) == 0 or len(neg) == 0:
-            print(f"  [probe] {key}: empty activations — skipping")
+            log.warning(f"  [probe] {key}: empty activations — skipping")
             continue
         res = compute_auroc_for_strategy(
             pos, neg,
@@ -169,14 +172,14 @@ def compute_all_auroc(
             sae_model=sae_model,
         )
         results[key] = res
-        if i % 20 == 0 or i == total:
-            print(f"  [probe] {i}/{total}  {key}  AUROC={res['auroc']:.3f} "
-                  f"CI=[{res['ci_low']:.3f},{res['ci_high']:.3f}]")
+        log.info(f"  [probe] {i}/{total}  {key}  "
+                 f"AUROC={res['auroc']:.3f}  CI=[{res['ci_low']:.3f},{res['ci_high']:.3f}]  "
+                 f"std={res['std']:.4f}  n_pos={res['n_pos']}  n_neg={res['n_neg']}")
 
     out_path = out_dir / f"{model_name}_auroc_results.json"
     with open(out_path, "w") as f:
         json.dump(results, f, indent=2)
-    print(f"  [probe] Saved AUROC results → {out_path}")
+    log.info(f"  [probe] Saved AUROC results → {out_path}")
     return results
 
 
@@ -300,7 +303,7 @@ def nemenyi_strategy_significance(auroc_matrix: np.ndarray,
             ph_result = posthoc_nemenyi_friedman(df_mat)
             nemenyi_pvalues = ph_result.values.astype(np.float64)
         except Exception as exc:
-            print(f"  [nemenyi] posthoc fallback: {exc}")
+            log.warning(f"  [nemenyi] posthoc fallback: {exc}")
 
     significant_pairs = []
     for i in range(n_strats):
@@ -567,7 +570,7 @@ def keyword_ablation_full(
         neg_abl_path  = ablation_act_dir / f"{concept}_neg_ablated.npy"
 
         if not all(p.exists() for p in [pos_full_path, neg_full_path, pos_abl_path, neg_abl_path]):
-            print(f"  [ablation] {concept}: missing files — skipping")
+            log.warning(f"  [ablation] {concept}: missing files — skipping")
             continue
 
         full_acts = np.load(pos_full_path, allow_pickle=True)
