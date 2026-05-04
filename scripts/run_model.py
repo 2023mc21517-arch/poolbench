@@ -177,7 +177,8 @@ def step_extract(model_name: str, device: str, skip_existing: bool = True,
 # ── Step 2: Pool + compute AUROC per layer, select best ───────────────────────
 
 def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONSTRUCTION,
-                        concept_filter: str | None = None) -> dict:
+                        concept_filter: str | None = None,
+                        skip_existing: bool = True) -> dict:
     """
     For each candidate layer, apply all 19 ranked strategies + compute AUROC.
     Select best layer per strategy (modal layer selection across all concepts).
@@ -192,7 +193,7 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
     expected_keys = [f"{concept}_{strategy}" for concept in concepts_to_run for strategy in RANKED_STRATEGIES]
 
     primary_out = AUROC_DIR / model_name / "best_layer_auroc.json"
-    existing_summary = _safe_load_json(primary_out)
+    existing_summary = _safe_load_json(primary_out) if skip_existing else None
     if existing_summary is not None:
         per_layer_existing = existing_summary.get("per_layer", {})
         layers_complete = True
@@ -216,7 +217,7 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
         layer_auroc_dir = AUROC_DIR / model_name / f"layer_{layer_idx}"
         layer_out_path = layer_auroc_dir / f"{model_name}_auroc_results.json"
 
-        existing_layer = _safe_load_json(layer_out_path)
+        existing_layer = _safe_load_json(layer_out_path) if skip_existing else None
         if existing_layer is not None:
             missing = _missing_keys(existing_layer, expected_keys)
             if not missing:
@@ -295,7 +296,8 @@ def _select_modal_layer(per_layer_results: dict[int, dict],
 
 def step_linearity(model_name: str, best_layer: int,
                    construction_method: str = DEFAULT_CONSTRUCTION,
-                   concept_filter: str | None = None) -> None:
+                   concept_filter: str | None = None,
+                   skip_existing: bool = True) -> None:
     """
     Run the linearity assumption check for each concept at the best layer.
     Saves results to results/linearity/{model_name}_linearity.json.
@@ -304,7 +306,7 @@ def step_linearity(model_name: str, best_layer: int,
     LINEARITY_DIR.mkdir(parents=True, exist_ok=True)
     concepts_to_run = CONCEPT_NAMES if concept_filter is None else [concept_filter]
     out_path = LINEARITY_DIR / f"{model_name}_linearity.json"
-    existing = _safe_load_json(out_path)
+    existing = _safe_load_json(out_path) if skip_existing else None
     if existing is not None:
         missing = _missing_keys(existing, concepts_to_run)
         if not missing:
@@ -347,7 +349,8 @@ def step_linearity(model_name: str, best_layer: int,
 # ── Step 4: ICC computation ───────────────────────────────────────────────────
 
 def step_icc(model_name: str, construction_method: str = DEFAULT_CONSTRUCTION,
-             concept_filter: str | None = None) -> None:
+             concept_filter: str | None = None,
+             skip_existing: bool = True) -> None:
     """
     Compute intraclass correlation across candidate layers (for N_eff correction).
     Requires best-layer auroc results already saved by step_pool_and_auroc.
@@ -356,7 +359,7 @@ def step_icc(model_name: str, construction_method: str = DEFAULT_CONSTRUCTION,
     ICC_DIR.mkdir(parents=True, exist_ok=True)
     concepts_to_run = CONCEPT_NAMES if concept_filter is None else [concept_filter]
     out_path = ICC_DIR / f"{model_name}_icc.json"
-    existing = _safe_load_json(out_path)
+    existing = _safe_load_json(out_path) if skip_existing else None
     if existing is not None:
         existing_concepts = existing.get("icc_per_concept", {})
         if isinstance(existing_concepts, dict) and not _missing_keys(existing_concepts, concepts_to_run):
@@ -440,6 +443,7 @@ def step_keyword_ablation(
     best_layer: int,
     device: str,
     concept_filter: str | None = None,
+    skip_existing: bool = True,
 ) -> None:
     """
     For each seeded concept, mask seed words in positive test passages, re-extract
@@ -467,7 +471,7 @@ def step_keyword_ablation(
 
     out_path = ABLATION_DIR / f"{model_name}_keyword_ablation.json"
     required_concepts = [name for name, _ in seeded_concepts]
-    existing = _safe_load_json(out_path)
+    existing = _safe_load_json(out_path) if skip_existing else None
     if existing is not None:
         missing = _missing_keys(existing, required_concepts)
         if not missing:
@@ -660,20 +664,28 @@ def run_model(model_name: str, args: argparse.Namespace) -> dict:
 
     concept_filter = getattr(args, "concept", None)
     skip_scp       = getattr(args, "skip_scp", False)
+    force_from_step = getattr(args, "force_from_step", None)
     t_start        = time.perf_counter()
+
+    def force_step(step: int) -> bool:
+        return force_from_step is not None and step >= force_from_step
 
     log.info(f"\n{'='*60}")
     log.info(f"  PoolBench pipeline starting: model={model_name}  device={args.device}")
     log.info(f"  GPU on start: {gpu_mem_str(args.device)}")
+    if force_from_step is not None:
+        log.info(f"  FORCE MODE: recomputing from Step {force_from_step} onward")
     log.info(f"{'='*60}")
 
     if not args.skip_extraction:
-        step_extract(model_name, device=args.device, concept_filter=concept_filter)
+        step_extract(model_name, device=args.device, concept_filter=concept_filter,
+                     skip_existing=not force_step(1))
 
     auroc_summary = step_pool_and_auroc(
         model_name           = model_name,
         construction_method  = getattr(args, "construction_method", DEFAULT_CONSTRUCTION),
         concept_filter       = concept_filter,
+        skip_existing        = not force_step(2),
     )
     best_layer = auroc_summary["best_layer"]
     log.info(f"  Best layer selected: {best_layer}")
@@ -681,23 +693,28 @@ def run_model(model_name: str, args: argparse.Namespace) -> dict:
     if not args.linearity_only:
         step_linearity(model_name, best_layer,
                        construction_method=getattr(args, "construction_method", DEFAULT_CONSTRUCTION),
-                       concept_filter=concept_filter)
+                       concept_filter=concept_filter,
+                       skip_existing=not force_step(3))
         step_icc(model_name,
                  construction_method=getattr(args, "construction_method", DEFAULT_CONSTRUCTION),
-                 concept_filter=concept_filter)
+                 concept_filter=concept_filter,
+                 skip_existing=not force_step(4))
 
         # Step 4b — keyword ablation check for seeded concepts
-        step_keyword_ablation(model_name, best_layer, args.device, concept_filter)
+        step_keyword_ablation(model_name, best_layer, args.device, concept_filter,
+                              skip_existing=not force_step(4))
 
         if not skip_scp:
             # Step 5 — Train Classifier B on GPU (BERT is small ~500 MB, releases before Step 6)
-            step_train_classifiers(device=args.device, force_retrain=False)
+            step_train_classifiers(device=args.device, force_retrain=force_step(5))
 
             # Step 6 — D2 SCP
-            step_scp(model_name, best_layer, args.device, concept_filter)
+            step_scp(model_name, best_layer, args.device, concept_filter,
+                     skip_existing=not force_step(6))
 
             # Step 7 — D3 Disentanglement
-            step_disentanglement(model_name, best_layer, args.device, concept_filter)
+            step_disentanglement(model_name, best_layer, args.device, concept_filter,
+                                 skip_existing=not force_step(7))
 
     # Load the best-layer auroc dict for Nemenyi aggregation
     best_layer_path = AUROC_DIR / model_name / "best_layer_auroc.json"
@@ -731,6 +748,9 @@ def main():
                         help="Skip activation extraction (assume already done)")
     parser.add_argument("--skip_scp", action="store_true",
                         help="Skip D2 SCP and D3 disentanglement steps")
+    parser.add_argument("--force_from_step", type=int, choices=range(1, 8), default=None,
+                        metavar="{1,2,3,4,5,6,7}",
+                        help="Recompute from this pipeline step onward, ignoring checkpoints for those steps")
     parser.add_argument("--linearity_only",  action="store_true",
                         help="Only run linearity checks (no extraction)")
     parser.add_argument("--nemenyi_only",    action="store_true",
