@@ -1,7 +1,7 @@
 """
 poolbench.evaluation
 ~~~~~~~~~~~~~~~~~~~~
-AUROC probing, statistical tests, linearity validation, and ICC.
+AUROC probing, statistical tests, linearity validation, ICC, and D2/D3 metrics.
 """
 from poolbench.evaluation.probe import (
     compute_auroc_for_strategy,
@@ -29,4 +29,8 @@ __all__ = [
     "N_BOOTSTRAP",
     "N_FOLDS",
     "RANDOM_SEED",
+    # D2 / D3 — imported lazily to avoid heavy HF imports at package import time
+    "classifier_b",
+    "scp_eval",
+    "disentanglement",
 ]

@@ -38,6 +38,10 @@ from typing import Optional
 import numpy as np
 from tqdm import tqdm
 
+from poolbench.logger import get_logger, gpu_mem_str, free_gpu_memory
+
+log = get_logger("poolbench.extract")
+
 
 # ── architecture detection ────────────────────────────────────────────────────
 
@@ -75,7 +79,7 @@ def load_model(model_name: str, hf_id: str, device: str = "cuda"):
     from transformers import AutoTokenizer, AutoModelForCausalLM  # noqa: PLC0415
     from transformers import AutoModelForSeq2SeqLM, AutoModelForMaskedLM
 
-    print(f"  [extract] Loading {model_name} ({hf_id}) on {device}…")
+    log.info(f"  [extract] Loading {model_name} ({hf_id}) on {device}  GPU before: {gpu_mem_str(device)}")
     tokenizer_kwargs = {
         "trust_remote_code": True,
         "padding_side": "left",  # for causal LMs
@@ -102,6 +106,7 @@ def load_model(model_name: str, hf_id: str, device: str = "cuda"):
         model = AutoModelForCausalLM.from_pretrained(hf_id, **model_kwargs)
 
     model.eval()
+    log.info(f"  [extract] Model loaded  GPU after: {gpu_mem_str(device)}")
     return model, tokenizer
 
 
@@ -210,14 +215,16 @@ def _extract_batch(
     hook.register(layer)
 
     try:
-        if is_ed:
-            # Only run encoder; decoder output not needed
-            _ = model.encoder(**enc)
-        else:
-            _ = model(**enc, output_attentions=not _is_ssm(model_name))
+        import torch as _t  # noqa: PLC0415
+        with _t.no_grad():
+            if is_ed:
+                # Only run encoder; decoder output not needed
+                _ = model.encoder(**enc)
+            else:
+                _ = model(**enc, output_attentions=not _is_ssm(model_name))
     except Exception as exc:
         hook.remove()
-        print(f"  [extract] forward pass error (layer {layer_idx}): {exc}")
+        log.error(f"  [extract] forward pass error (layer {layer_idx}): {exc}")
         return []
 
     hook.remove()
@@ -303,9 +310,15 @@ def extract_activations_for_model(
     out_dir            = Path(out_dir)
     model, tokenizer   = load_model(model_name, hf_id, device=device)
 
+    n_layers   = len(candidate_layers)
+    n_concepts = sum(1 for d in concept_corpus_dir.iterdir() if d.is_dir())
+    log.info(f"  [extract] {model_name}: {n_layers} layers × {n_concepts} concepts  "
+             f"batch={batch_size}  GPU: {gpu_mem_str(device)}")
+
     for layer_idx in candidate_layers:
         layer_dir = out_dir / model_name / f"layer_{layer_idx}"
         layer_dir.mkdir(parents=True, exist_ok=True)
+        log.info(f"  [extract] Layer {layer_idx}  GPU: {gpu_mem_str(device)}")
 
         for concept_dir in sorted(concept_corpus_dir.iterdir()):
             if not concept_dir.is_dir():
@@ -316,16 +329,18 @@ def extract_activations_for_model(
                 for partition in ("test",):   # AUROC evaluated on test split only
                     jsonl_path = concept_dir / f"{partition}_{split}.jsonl"
                     if not jsonl_path.exists():
-                        print(f"  [extract] {concept_name}/{split}/{partition}: not found")
+                        log.warning(f"  [extract] {concept_name}/{split}/{partition}: not found")
                         continue
 
                     out_path = layer_dir / f"{concept_name}_{split}.npy"
                     if skip_existing and out_path.exists():
-                        print(f"  [extract] {out_path.name} exists — skipping")
+                        log.info(f"  [extract] {out_path.name} exists — skipping")
                         continue
 
                     records = load_jsonl(str(jsonl_path))
                     texts   = [r["text"] for r in records]
+                    log.info(f"  [extract] {concept_name}/{split} L{layer_idx}: "
+                             f"{len(texts)} passages  GPU: {gpu_mem_str(device)}")
 
                     all_items: list[dict] = []
                     for batch_start in tqdm(range(0, len(texts), batch_size),
@@ -340,13 +355,14 @@ def extract_activations_for_model(
                     for k, item in enumerate(all_items):
                         arr[k] = item
                     np.save(out_path, arr)
-                    print(f"  [extract] Saved {len(all_items)} passages → {out_path}")
+                    log.info(f"  [extract] Saved {len(all_items)} passages → {out_path}  "
+                             f"GPU: {gpu_mem_str(device)}")
 
-    # Free GPU memory
+    # Free GPU memory after all extractions complete
     del model
     torch.cuda.empty_cache()
     gc.collect()
-    print(f"  [extract] Done. GPU memory freed.")
+    log.info(f"  [extract] {model_name}: all layers done. GPU freed: {gpu_mem_str(device)}")
 
 
 def load_activations(act_dir: str | Path, model_name: str,

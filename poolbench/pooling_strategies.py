@@ -583,3 +583,74 @@ def compute_all_pooling_strategies(act_dir, concepts: dict,
             print(f"  [WARN] {s} fallback rate {rate:.1%} > 30% — strategy is effectively mean pooling")
 
     return results
+
+
+# ── Simple single-strategy helper (used by SCP / disentanglement) ─────────────
+
+def compute_pooled_vectors(
+    activation_items: np.ndarray,
+    strategy_id: str,
+    tokenizer=None,
+    unigram_probs: dict | None = None,
+    dep_triggers: list | None = None,
+) -> np.ndarray:
+    """
+    Apply a SINGLE pooling strategy to an array of activation item dicts.
+    Returns (N, d_model) float32 ndarray.
+
+    Strategies that require extra artefacts (tokenizer for L4, unigram_probs
+    for S2_SIF, attention for S1) fall back to mean pooling when artefacts are
+    absent, matching the production fallback behaviour.
+
+    Parameters
+    ----------
+    activation_items : np array of dicts (schema: hidden, offset_mapping, text, token_ids, attn_weights)
+    strategy_id      : e.g. "A1_mean", "L2_dependency_rel"
+    tokenizer        : HF tokenizer (needed for L4_subword_root)
+    unigram_probs    : {token_id: prob} (needed for S2_SIF)
+    dep_triggers     : list of trigger words for L2_dependency_rel
+    """
+    if strategy_id not in STRATEGY_REGISTRY:
+        return np.stack([item["hidden"].mean(0) for item in activation_items]).astype(np.float32)
+
+    pool_fn = STRATEGY_REGISTRY[strategy_id][0]
+    dep_triggers = dep_triggers or []
+    pooled = []
+
+    for item in activation_items:
+        h      = item["hidden"]          # (seq_len, d_model)
+        text   = item.get("text", "")
+        offsets = item.get("offset_mapping", [])
+        tids   = item.get("token_ids", [])
+        attn   = item.get("attn_weights")  # (n_heads, L, L) or None
+
+        try:
+            if strategy_id == "L1_POS_filtered":
+                vec = pool_fn(h, text, offsets)
+            elif strategy_id == "L2_dependency_rel":
+                vec = pool_fn(h, text, dep_triggers, offsets)
+            elif strategy_id == "L3_named_entity":
+                vec = pool_fn(h, text, offsets)
+            elif strategy_id == "L4_subword_root":
+                vec = pool_fn(h, tids, tokenizer) if (tokenizer and tids) else pool_mean(h)
+            elif strategy_id == "L5_SVO":
+                vec = pool_fn(h, text, offsets)
+            elif strategy_id == "S1_attention_weighted":
+                if attn is not None:
+                    inflow = attn.mean(axis=0).mean(axis=0)
+                    vec = pool_fn(h, inflow)
+                else:
+                    vec = pool_mean(h)
+            elif strategy_id == "S2_SIF":
+                vec = pool_fn(h, tids, unigram_probs) if (unigram_probs and tids) else pool_mean(h)
+            elif strategy_id == "S3_ITI_exact":
+                vec = pool_fn(h, attn, concept_probe=None)   # no probe at SCP stage
+            else:
+                vec = pool_fn(h)
+        except Exception:
+            vec = pool_mean(h)
+
+        pooled.append(vec)
+
+    return np.stack(pooled).astype(np.float32)  # (N, d_model)
+
