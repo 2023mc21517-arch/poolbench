@@ -113,6 +113,8 @@ def _compute_steering_vector(
     layer_idx: int,
     concept_name: str,
     strategy_id: str,
+    unigram_probs: dict | None = None,
+    concept_probe=None,
 ) -> Optional[np.ndarray]:
     """
     Compute the DiffMean steering vector for a (concept, strategy) pair.
@@ -122,16 +124,20 @@ def _compute_steering_vector(
     from poolbench.extract_activations import load_activations  # noqa: PLC0415
     from poolbench.pooling_strategies import compute_pooled_vectors  # noqa: PLC0415
 
-    pos_acts = load_activations(act_dir, model_name, layer_idx, concept_name, "pos")
-    neg_acts = load_activations(act_dir, model_name, layer_idx, concept_name, "neg")
+    pos_acts = load_activations(act_dir, model_name, layer_idx, concept_name, "pos", partition="train")
+    neg_acts = load_activations(act_dir, model_name, layer_idx, concept_name, "neg", partition="train")
 
     if pos_acts is None or neg_acts is None:
         log.warning(f"    [scp] missing activations for {concept_name} L{layer_idx} — skip")
         return None
 
     try:
-        pos_vecs = compute_pooled_vectors(pos_acts, strategy_id)  # (N, d_model)
-        neg_vecs = compute_pooled_vectors(neg_acts, strategy_id)
+        pos_vecs = compute_pooled_vectors(pos_acts, strategy_id,
+                          unigram_probs=unigram_probs,
+                          concept_probe=concept_probe)  # (N, d_model)
+        neg_vecs = compute_pooled_vectors(neg_acts, strategy_id,
+                          unigram_probs=unigram_probs,
+                          concept_probe=concept_probe)
     except Exception as exc:
         log.error(f"    [scp] pooling error {concept_name}/{strategy_id}: {exc}")
         return None
@@ -228,6 +234,8 @@ def _compute_concept_scp(
     classifier,
     classifier_tok,
     device: str,
+    unigram_probs: dict | None = None,
+    concept_probes: dict | None = None,
 ) -> dict:
     """
     Compute SCP for all strategies of one concept.
@@ -249,7 +257,11 @@ def _compute_concept_scp(
     # so the hook is registered but has zero effect (alpha=0.0 means no addition).
     _first_sv: np.ndarray | None = None
     for _sid in strategy_ids:
-        _sv = _compute_steering_vector(act_dir, model_name, layer_idx, concept_name, _sid)
+        _sv = _compute_steering_vector(
+            act_dir, model_name, layer_idx, concept_name, _sid,
+            unigram_probs=unigram_probs,
+            concept_probe=concept_probes.get(concept_name) if concept_probes else None,
+        )
         if _sv is not None:
             _first_sv = _sv
             break
@@ -268,7 +280,11 @@ def _compute_concept_scp(
     log.info(f"      [baseline] score={baseline_score:.4f}  ppl={baseline_ppl:.1f}")
 
     for strat_id in strategy_ids:
-        sv = _compute_steering_vector(act_dir, model_name, layer_idx, concept_name, strat_id)
+        sv = _compute_steering_vector(
+            act_dir, model_name, layer_idx, concept_name, strat_id,
+            unigram_probs=unigram_probs,
+            concept_probe=concept_probes.get(concept_name) if concept_probes else None,
+        )
         if sv is None:
             log.warning(f"      skipping strategy {strat_id} (no steering vector)")
             continue
@@ -362,8 +378,17 @@ def compute_scp_for_model(
     # ── Load LLM ─────────────────────────────────────────────────────────────
     log.info(f"\n  [scp] Starting D2 SCP for {model_name}  GPU: {gpu_mem_str(device)}")
     from poolbench.extract_activations import load_model as _load_model  # noqa: PLC0415
+    from poolbench.concepts import CONCEPTS  # noqa: PLC0415
+    from poolbench.pooling_strategies import (  # noqa: PLC0415
+        build_unigram_probs_from_activations, build_iti_concept_probes,
+    )
     model, tokenizer = _load_model(model_name, hf_id, device)
     log.info(f"  [scp] {model_name} loaded  GPU: {gpu_mem_str(device)}")
+    layer_act_dir = Path(act_dir) / model_name / f"layer_{best_layer}"
+    concepts_meta = {c: CONCEPTS[c] for c in concepts if c in CONCEPTS}
+    unigram_probs = build_unigram_probs_from_activations(layer_act_dir, concepts_meta, partition="train")
+    concept_probes = build_iti_concept_probes(layer_act_dir, concepts_meta, partition="train")
+    log.info(f"  [scp] S2 unigram vocab={len(unigram_probs)}  S3 ITI probes={len(concept_probes)}")
 
     for concept_name in concepts:
         if concept_name in all_results:
@@ -379,7 +404,9 @@ def compute_scp_for_model(
             concept_results = _compute_concept_scp(
                 model, tokenizer, model_name, best_layer,
                 concept_name, strategy_ids, act_dir,
-                clf, clf_tok, device,
+                                clf, clf_tok, device,
+                                unigram_probs=unigram_probs,
+                                concept_probes=concept_probes,
             )
 
         all_results[concept_name] = concept_results

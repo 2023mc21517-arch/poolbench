@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from poolbench.data.concepts import CONCEPTS
 
 corpora = Path(__file__).parent.parent / "data" / "corpora"
-targets = ["conditionality", "frustration", "uncertainty", "planning",
+targets = ["conditionality", "frustration", "planning",
            "hedging", "legal_formality", "deference", "causation",
            "contrast"]
 

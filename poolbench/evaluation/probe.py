@@ -183,6 +183,102 @@ def compute_all_auroc(
     return results
 
 
+def compute_train_test_auroc_for_strategy(
+    train_pos_pooled: np.ndarray,
+    train_neg_pooled: np.ndarray,
+    test_pos_pooled: np.ndarray,
+    test_neg_pooled: np.ndarray,
+    construction_method: str = DEFAULT_CONSTRUCTION,
+    n_bootstrap: int = N_BOOTSTRAP,
+    sae_model=None,
+) -> dict[str, float]:
+    """Train the concept direction on the train split and evaluate AUROC on test."""
+    train_pos = train_pos_pooled.astype(np.float32)
+    train_neg = train_neg_pooled.astype(np.float32)
+    test_pos  = test_pos_pooled.astype(np.float32)
+    test_neg  = test_neg_pooled.astype(np.float32)
+
+    train_pos /= np.linalg.norm(train_pos, axis=1, keepdims=True) + 1e-9
+    train_neg /= np.linalg.norm(train_neg, axis=1, keepdims=True) + 1e-9
+    test_pos  /= np.linalg.norm(test_pos,  axis=1, keepdims=True) + 1e-9
+    test_neg  /= np.linalg.norm(test_neg,  axis=1, keepdims=True) + 1e-9
+
+    construct_fn = get_construction_method(construction_method)
+    if construction_method == "C5_sae_feature":
+        d = construct_fn(train_pos, train_neg, sae_model)
+        if d is None:
+            from poolbench.construction.methods import construct_difmean as _dm  # noqa
+            d = _dm(train_pos, train_neg)
+    else:
+        d = construct_fn(train_pos, train_neg)
+
+    y_test = np.array([1] * len(test_pos) + [0] * len(test_neg), dtype=np.int32)
+    scores = np.concatenate([test_pos @ d, test_neg @ d])
+    auroc = _auroc_from_scores(y_test, scores)
+
+    rng = np.random.default_rng(RANDOM_SEED)
+    n = len(y_test)
+    boot = []
+    for _ in range(n_bootstrap):
+        idx = rng.choice(n, size=n, replace=True)
+        if len(np.unique(y_test[idx])) < 2:
+            continue
+        boot.append(_auroc_from_scores(y_test[idx], scores[idx]))
+    ci_low, ci_high = (float(np.percentile(boot, 2.5)), float(np.percentile(boot, 97.5))) if boot else (auroc, auroc)
+
+    return {
+        "auroc": auroc,
+        "ci_low": ci_low,
+        "ci_high": ci_high,
+        "std": float(np.std(boot)) if boot else 0.0,
+        "n_train_pos": len(train_pos),
+        "n_train_neg": len(train_neg),
+        "n_pos": len(test_pos),
+        "n_neg": len(test_neg),
+        "construction_method": construction_method,
+        "protocol": "train_test",
+    }
+
+
+def compute_all_train_test_auroc(
+    train_pooled_results: dict,
+    test_pooled_results: dict,
+    model_name: str,
+    out_dir: str | Path,
+    construction_method: str = DEFAULT_CONSTRUCTION,
+    sae_model=None,
+) -> dict:
+    """Compute D1 using train-pooled vectors for direction construction and test vectors for AUROC."""
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    results: dict[str, Any] = {}
+    keys = sorted(set(train_pooled_results) & set(test_pooled_results))
+    total = len(keys)
+    for i, key in enumerate(keys, 1):
+        tr = train_pooled_results[key]
+        te = test_pooled_results[key]
+        if len(tr["pos_pooled"]) == 0 or len(tr["neg_pooled"]) == 0 or len(te["pos_pooled"]) == 0 or len(te["neg_pooled"]) == 0:
+            log.warning(f"  [probe] {key}: empty train/test activations — skipping")
+            continue
+        res = compute_train_test_auroc_for_strategy(
+            tr["pos_pooled"], tr["neg_pooled"], te["pos_pooled"], te["neg_pooled"],
+            construction_method=construction_method,
+            sae_model=sae_model,
+        )
+        results[key] = res
+        log.info(f"  [probe] {i}/{total}  {key}  "
+                 f"AUROC={res['auroc']:.3f}  CI=[{res['ci_low']:.3f},{res['ci_high']:.3f}]  "
+                 f"std={res['std']:.4f}  n_train_pos={res['n_train_pos']}  n_train_neg={res['n_train_neg']}  "
+                 f"n_test_pos={res['n_pos']}  n_test_neg={res['n_neg']}")
+
+    out_path = out_dir / f"{model_name}_auroc_results.json"
+    with open(out_path, "w") as f:
+        json.dump(results, f, indent=2)
+    log.info(f"  [probe] Saved train/test AUROC results → {out_path}")
+    return results
+
+
 # ── D1 — Nemenyi pair significance test ──────────────────────────────────────
 
 def build_nemenyi_auroc_matrix(
@@ -218,7 +314,8 @@ def build_nemenyi_auroc_matrix(
 def nemenyi_strategy_significance(auroc_matrix: np.ndarray,
                                   strategy_ids: list[str],
                                   alpha: float = 0.05,
-                                  cd_tier_threshold: float = 0.30) -> dict:
+                                  cd_tier_threshold: float = 0.30,
+                                  effective_n: float | None = None) -> dict:
     """
     Friedman test + Nemenyi post-hoc pairwise significance test over strategy rankings.
 
@@ -272,7 +369,8 @@ def nemenyi_strategy_significance(auroc_matrix: np.ndarray,
 
     # Critical difference (alpha, two-tailed Wilcoxon signed rank)
     k  = n_strats
-    N  = mat_clean.shape[1]
+    N_raw = mat_clean.shape[1]
+    N  = max(float(effective_n), 1.0) if effective_n is not None else float(N_raw)
     # Nemenyi CD formula: CD = q_alpha * sqrt(k*(k+1) / (6*N))
     # q_alpha table (from Demšar 2006) for k strategies at alpha=0.05
     _q_table = {
@@ -333,6 +431,8 @@ def nemenyi_strategy_significance(auroc_matrix: np.ndarray,
     return {
         "friedman_p":        float(friedman_p),
         "cd":                cd,
+        "N_raw":             int(N_raw),
+        "N_effective":       float(N),
         "avg_ranks":         {strategy_ids[i]: float(avg_ranks[i]) for i in range(n_strats)},
         "significant_pairs": significant_pairs,
         "tier_boundaries":   tier_boundaries,

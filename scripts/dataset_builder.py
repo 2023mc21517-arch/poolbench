@@ -1633,7 +1633,7 @@ def main():
     group.add_argument("--concept", choices=CONCEPT_NAMES,
                        help="Build a single concept corpus")
     group.add_argument("--all", action="store_true",
-                       help="Build all 18 concept corpora sequentially")
+                       help="Build all 17 concept corpora sequentially")
     parser.add_argument("--n_train", type=int, default=700,
                         help="Training passages per class (default 700)")
     parser.add_argument("--n_test",  type=int, default=300,

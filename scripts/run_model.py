@@ -43,11 +43,14 @@ import numpy as np
 
 from poolbench.concepts           import CONCEPTS, CONCEPT_NAMES
 from poolbench.pooling_strategies import (STRATEGY_REGISTRY, RANKED_STRATEGIES,
-                                    compute_all_pooling_strategies)
+                                    compute_all_pooling_strategies,
+                                    build_unigram_probs_from_activations,
+                                    build_iti_concept_probes)
 from poolbench.construction_methods import DEFAULT_CONSTRUCTION
 from poolbench.probe_training       import (compute_all_auroc, check_linearity_assumption,
                                       compute_layer_icc, nemenyi_strategy_significance,
-                                      build_nemenyi_auroc_matrix)
+                                      build_nemenyi_auroc_matrix,
+                                      compute_all_train_test_auroc)
 from poolbench.extract_activations  import extract_activations_for_model, load_activations
 from poolbench.logger               import get_logger, gpu_mem_str, free_gpu_memory, log_step, find_free_gpu
 
@@ -210,6 +213,7 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
             }
 
     per_layer_results: dict[int, dict] = {}
+    fallback_accumulator: dict = {"counts": {}, "total": 0}
 
     for layer_idx in cfg["candidate_layers"]:
         log.info(f"\n  Layer {layer_idx}  GPU: {gpu_mem_str()}")
@@ -226,30 +230,62 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
                 continue
             log.info(f"  [checkpoint] Step 2 layer {layer_idx} missing {len(missing)} AUROC cells — recomputing layer")
 
+        unigram_probs = build_unigram_probs_from_activations(layer_act_dir, concepts_to_run, partition="train")
+        concept_probes = build_iti_concept_probes(layer_act_dir, concepts_to_run, partition="train")
+        log.info(f"  [pool] S2 unigram vocab={len(unigram_probs)}  S3 ITI probes={len(concept_probes)}")
+
         # Build pooled_results: {concept_strategy: {pos_pooled, neg_pooled}}
-        pooled_results: dict = {}
+        train_pooled_results: dict = {}
+        test_pooled_results: dict = {}
         for concept_name in concepts_to_run:
-            pos_acts = load_activations(ACT_DIR, model_name, layer_idx, concept_name, "pos")
-            neg_acts = load_activations(ACT_DIR, model_name, layer_idx, concept_name, "neg")
-            if pos_acts is None or neg_acts is None:
+            train_pos = load_activations(ACT_DIR, model_name, layer_idx, concept_name, "pos", partition="train")
+            train_neg = load_activations(ACT_DIR, model_name, layer_idx, concept_name, "neg", partition="train")
+            test_pos = load_activations(ACT_DIR, model_name, layer_idx, concept_name, "pos", partition="test")
+            test_neg = load_activations(ACT_DIR, model_name, layer_idx, concept_name, "neg", partition="test")
+            if train_pos is None or train_neg is None or test_pos is None or test_neg is None:
                 log.warning(f"  [pool] {concept_name} L{layer_idx}: activations missing — skip")
                 continue
             # Apply all pooling strategies
             concept_dict = {concept_name: concepts_to_run[concept_name]}
-            layer_pooled = compute_all_pooling_strategies(
+            train_layer_pooled = compute_all_pooling_strategies(
                 act_dir       = layer_act_dir,
                 concepts      = concept_dict,
                 tokenizer_name= cfg["hf_id"],
+                unigram_probs = unigram_probs,
+                concept_probes= concept_probes,
+                partition     = "train",
+                fallback_accumulator = fallback_accumulator,
             )
-            pooled_results.update(layer_pooled)
+            test_layer_pooled = compute_all_pooling_strategies(
+                act_dir       = layer_act_dir,
+                concepts      = concept_dict,
+                tokenizer_name= cfg["hf_id"],
+                unigram_probs = unigram_probs,
+                concept_probes= concept_probes,
+                partition     = "test",
+                fallback_accumulator = fallback_accumulator,
+            )
+            train_pooled_results.update(train_layer_pooled)
+            test_pooled_results.update(test_layer_pooled)
 
-        auroc_res = compute_all_auroc(
-            pooled_results       = pooled_results,
+        auroc_res = compute_all_train_test_auroc(
+            train_pooled_results = train_pooled_results,
+            test_pooled_results  = test_pooled_results,
             model_name           = model_name,
             out_dir              = layer_auroc_dir,
             construction_method  = construction_method,
         )
         per_layer_results[layer_idx] = auroc_res
+
+    fallback_out = AUROC_DIR / model_name / "fallback_rates.json"
+    fallback_total = max(fallback_accumulator.get("total", 0), 1)
+    fallback_rates = {
+        s: count / fallback_total for s, count in fallback_accumulator.get("counts", {}).items()
+    }
+    fallback_out.parent.mkdir(parents=True, exist_ok=True)
+    with open(fallback_out, "w") as f:
+        json.dump({"rates": fallback_rates, **fallback_accumulator}, f, indent=2)
+    log.info(f"  [pool] aggregate fallback rates saved → {fallback_out}")
 
     # Modal layer selection: for each strategy, find best layer across concepts
     best_layer = _select_modal_layer(per_layer_results, cfg["candidate_layers"])
@@ -319,8 +355,8 @@ def step_linearity(model_name: str, best_layer: int,
         if concept_name in linearity_results:
             log.info(f"  [checkpoint] Step 3 {concept_name} already done — skipping")
             continue
-        pos_acts = load_activations(ACT_DIR, model_name, best_layer, concept_name, "pos")
-        neg_acts = load_activations(ACT_DIR, model_name, best_layer, concept_name, "neg")
+        pos_acts = load_activations(ACT_DIR, model_name, best_layer, concept_name, "pos", partition="train")
+        neg_acts = load_activations(ACT_DIR, model_name, best_layer, concept_name, "neg", partition="train")
         if pos_acts is None or neg_acts is None:
             continue
 
@@ -414,6 +450,14 @@ def step_nemenyi(all_model_auroc_results: dict[str, dict],
 
     concepts = CONCEPT_NAMES if concept_filter is None else [concept_filter]
     models   = list(all_model_auroc_results.keys())
+    effective_n = 0.0
+    for model_name in models:
+        icc_path = ICC_DIR / f"{model_name}_icc.json"
+        icc_data = _safe_load_json(icc_path)
+        if icc_data and icc_data.get("N_eff"):
+            effective_n += len(concepts) * (float(icc_data["N_eff"]) / 300.0)
+        else:
+            effective_n += len(concepts)
 
     auroc_matrix = build_nemenyi_auroc_matrix(
         auroc_results_per_model = all_model_auroc_results,
@@ -422,7 +466,8 @@ def step_nemenyi(all_model_auroc_results: dict[str, dict],
         model_names             = models,
     )
 
-    result = nemenyi_strategy_significance(auroc_matrix, RANKED_STRATEGIES)
+    result = nemenyi_strategy_significance(auroc_matrix, RANKED_STRATEGIES,
+                                           effective_n=effective_n)
     # Serialise (nemenyi_pvalues is ndarray — convert to list)
     result_serialisable = {k: v for k, v in result.items() if k != "nemenyi_pvalues"}
     result_serialisable["nemenyi_pvalues"] = result["nemenyi_pvalues"].tolist() \
@@ -431,7 +476,8 @@ def step_nemenyi(all_model_auroc_results: dict[str, dict],
     out_path = NEMENYI_DIR / "nemenyi_strategy_significance.json"
     with open(out_path, "w") as f:
         json.dump(result_serialisable, f, indent=2)
-    log.info(f"  Friedman p={result.get('friedman_p', 'N/A'):.4e}  CD={result.get('cd', 'N/A'):.3f}")
+    log.info(f"  Friedman p={result.get('friedman_p', 'N/A'):.4e}  CD={result.get('cd', 'N/A'):.3f}  "
+             f"N_eff={result.get('N_effective', 'N/A')}")
     log.info(f"  Significant pairs: {len(result.get('significant_pairs', []))}")
     log.info(f"  Saved → {out_path}")
 
@@ -519,8 +565,8 @@ def step_keyword_ablation(
             continue
 
         # Full activations already extracted in Step 1
-        full_pos = load_activations(ACT_DIR, model_name, best_layer, concept_name, "pos")
-        full_neg = load_activations(ACT_DIR, model_name, best_layer, concept_name, "neg")
+        full_pos = load_activations(ACT_DIR, model_name, best_layer, concept_name, "pos", partition="test")
+        full_neg = load_activations(ACT_DIR, model_name, best_layer, concept_name, "neg", partition="test")
         if full_pos is None or full_neg is None:
             log.warning(f"  [ablation] {concept_name}: full activations not found — run Step 1 first")
             continue

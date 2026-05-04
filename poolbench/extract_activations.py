@@ -326,20 +326,20 @@ def extract_activations_for_model(
             concept_name = concept_dir.name
 
             for split in ("pos", "neg"):
-                for partition in ("test",):   # AUROC evaluated on test split only
+                for partition in ("train", "test"):
                     jsonl_path = concept_dir / f"{partition}_{split}.jsonl"
                     if not jsonl_path.exists():
                         log.warning(f"  [extract] {concept_name}/{split}/{partition}: not found")
                         continue
 
-                    out_path = layer_dir / f"{concept_name}_{split}.npy"
+                    out_path = layer_dir / f"{concept_name}_{partition}_{split}.npy"
                     if skip_existing and out_path.exists():
                         log.info(f"  [extract] {out_path.name} exists — skipping")
                         continue
 
                     records = load_jsonl(str(jsonl_path))
                     texts   = [r["text"] for r in records]
-                    log.info(f"  [extract] {concept_name}/{split} L{layer_idx}: "
+                    log.info(f"  [extract] {concept_name}/{partition}/{split} L{layer_idx}: "
                              f"{len(texts)} passages  GPU: {gpu_mem_str(device)}")
 
                     all_items: list[dict] = []
@@ -367,12 +367,16 @@ def extract_activations_for_model(
 
 def load_activations(act_dir: str | Path, model_name: str,
                      layer_idx: int, concept_name: str,
-                     split: str = "pos") -> np.ndarray | None:
+                     split: str = "pos",
+                     partition: str = "train") -> np.ndarray | None:
     """
     Load a saved activation object array.
     Returns np.ndarray of dicts, or None if file not found.
     """
-    path = Path(act_dir) / model_name / f"layer_{layer_idx}" / f"{concept_name}_{split}.npy"
+    path = Path(act_dir) / model_name / f"layer_{layer_idx}" / f"{concept_name}_{partition}_{split}.npy"
+    if not path.exists() and partition == "train":
+        # Backward-compatible fallback for old test-only activation files.
+        path = Path(act_dir) / model_name / f"layer_{layer_idx}" / f"{concept_name}_{split}.npy"
     if not path.exists():
         return None
     return np.load(path, allow_pickle=True)

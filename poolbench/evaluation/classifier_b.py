@@ -33,6 +33,8 @@ from poolbench.logger import get_logger, gpu_mem_str, free_gpu_memory
 
 log = get_logger("poolbench.classifier_b")
 
+ZERO_SHOT_MODEL_ID = "facebook/bart-large-mnli"
+
 # ── Concepts handled by zero-shot LLM (§52) ──────────────────────────────────
 LLM_SCORED_CONCEPTS: set[str] = {
     "bureaucratic",
@@ -496,7 +498,12 @@ def load_classifier_b(
     Returns (model, tokenizer) or (None, None) for LLM-scored concepts.
     """
     if concept in LLM_SCORED_CONCEPTS:
-        return None, None
+        from transformers import pipeline  # noqa: PLC0415
+        log.info(f"  [classifier_b] Loading zero-shot scorer for '{concept}' → {ZERO_SHOT_MODEL_ID}")
+        device_s = str(device)
+        device_id = int(device_s.split(":", 1)[1]) if device_s.startswith("cuda:") else (0 if device_s == "cuda" else -1)
+        scorer = pipeline("zero-shot-classification", model=ZERO_SHOT_MODEL_ID, device=device_id)
+        return {"type": "zero_shot", "concept": concept, "pipeline": scorer}, None
 
     save_dir = Path(classifiers_dir) / concept
     if not save_dir.exists():
@@ -519,8 +526,27 @@ def score_texts(
 ) -> list[float]:
     """
     Run classifier on `texts` and return P(positive) for each.
-    If classifier is None (LLM-scored concept), returns [0.5] * len(texts) as placeholder.
+    If classifier is a zero-shot scorer, returns entailment probability for the
+    concept's positive definition.
     """
+    if isinstance(classifier, dict) and classifier.get("type") == "zero_shot":
+        from poolbench.concepts import CONCEPTS  # noqa: PLC0415
+        concept = classifier["concept"]
+        pipe = classifier["pipeline"]
+        meta = CONCEPTS.get(concept, {})
+        pos_label = meta.get("positive_def", concept.replace("_", " "))
+        neg_label = meta.get("negative_def", f"not {concept.replace('_', ' ')}")
+        scores: list[float] = []
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+            outputs = pipe(batch, candidate_labels=[pos_label, neg_label], multi_label=False)
+            if isinstance(outputs, dict):
+                outputs = [outputs]
+            for out in outputs:
+                labels = out.get("labels", [])
+                vals = out.get("scores", [])
+                scores.append(float(vals[labels.index(pos_label)]) if pos_label in labels else 0.5)
+        return scores
     if classifier is None or tokenizer is None:
         return [0.5] * len(texts)
 

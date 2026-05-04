@@ -8,6 +8,8 @@ from poolbench.evaluation.probe import *  # noqa: F401, F403
 from poolbench.evaluation.probe import (
     compute_auroc_for_strategy,
     compute_all_auroc,
+    compute_train_test_auroc_for_strategy,
+    compute_all_train_test_auroc,
     build_nemenyi_auroc_matrix,
     nemenyi_strategy_significance,
     check_linearity_assumption,

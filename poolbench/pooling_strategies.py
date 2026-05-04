@@ -14,6 +14,8 @@ from __future__ import annotations
 import numpy as np
 import spacy
 from functools import lru_cache
+from pathlib import Path
+from types import SimpleNamespace
 
 # Load spaCy once at module level (disabled components that aren't needed for pooling)
 @lru_cache(maxsize=1)
@@ -435,10 +437,75 @@ RANKED_STRATEGIES     = [s for s in STRATEGY_REGISTRY if s not in OFF_LEADERBOAR
 
 # ── Batch application ─────────────────────────────────────────────────────────
 
+def build_unigram_probs_from_activations(act_dir, concepts: dict,
+                                         partition: str = "train") -> dict[int, float]:
+    """Estimate token unigram probabilities from saved activation token_ids."""
+    from collections import Counter
+    act_dir = Path(act_dir)
+    counts: Counter[int] = Counter()
+    total = 0
+    for concept_name in concepts:
+        for split in ("pos", "neg"):
+            path = act_dir / f"{concept_name}_{partition}_{split}.npy"
+            if not path.exists():
+                continue
+            for item in np.load(path, allow_pickle=True):
+                tids = item.get("token_ids", [])
+                counts.update(int(t) for t in tids)
+                total += len(tids)
+    return {tok: cnt / max(total, 1) for tok, cnt in counts.items()}
+
+
+def build_iti_concept_probes(act_dir, concepts: dict,
+                             partition: str = "train") -> dict:
+    """Build lightweight supervised ITI head-score probes from train activations."""
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.model_selection import cross_val_score
+
+    act_dir = Path(act_dir)
+    probes = {}
+    for concept_name in concepts:
+        pos_path = act_dir / f"{concept_name}_{partition}_pos.npy"
+        neg_path = act_dir / f"{concept_name}_{partition}_neg.npy"
+        if not pos_path.exists() or not neg_path.exists():
+            continue
+        pos_acts = np.load(pos_path, allow_pickle=True)
+        neg_acts = np.load(neg_path, allow_pickle=True)
+        sample = next((x for x in list(pos_acts) + list(neg_acts) if x.get("attn_weights") is not None), None)
+        if sample is None:
+            continue
+        n_heads = sample["attn_weights"].shape[0]
+        head_scores = np.zeros(n_heads, dtype=np.float32)
+        y = np.array([1] * len(pos_acts) + [0] * len(neg_acts), dtype=np.int32)
+        all_acts = list(pos_acts) + list(neg_acts)
+        for head_idx in range(n_heads):
+            feats = []
+            for item in all_acts:
+                h = item["hidden"]
+                attn = item.get("attn_weights")
+                if attn is None:
+                    feats.append(pool_mean(h))
+                    continue
+                inflow = attn[head_idx].mean(axis=0)
+                inflow = inflow / (inflow.sum() + 1e-9)
+                feats.append((inflow[:, None] * h).sum(axis=0))
+            X = np.stack(feats).astype(np.float32)
+            X /= np.linalg.norm(X, axis=1, keepdims=True) + 1e-9
+            try:
+                clf = LogisticRegression(C=1.0, max_iter=300, solver="lbfgs", random_state=42)
+                scores = cross_val_score(clf, X, y, cv=3, scoring="roc_auc")
+                head_scores[head_idx] = float(np.nanmean(scores))
+            except Exception:
+                head_scores[head_idx] = 0.5
+        probes[concept_name] = SimpleNamespace(head_scores=head_scores)
+    return probes
+
 def compute_all_pooling_strategies(act_dir, concepts: dict,
                                    tokenizer_name: str | None = None,
                                    unigram_probs: dict | None = None,
-                                   concept_probes: dict | None = None) -> dict:
+                                   concept_probes: dict | None = None,
+                                   partition: str = "train",
+                                   fallback_accumulator: dict | None = None) -> dict:
     """
     Load activation .npy files from act_dir and apply every ranked strategy.
 
@@ -475,8 +542,8 @@ def compute_all_pooling_strategies(act_dir, concepts: dict,
     results: dict = {}
 
     for concept_name, concept_meta in concepts.items():
-        pos_path = act_dir / f"{concept_name}_pos.npy"
-        neg_path = act_dir / f"{concept_name}_neg.npy"
+        pos_path = act_dir / f"{concept_name}_{partition}_pos.npy"
+        neg_path = act_dir / f"{concept_name}_{partition}_neg.npy"
         if not pos_path.exists() or not neg_path.exists():
             print(f"  [pool] Missing .npy for {concept_name} — skipping")
             continue
@@ -575,9 +642,15 @@ def compute_all_pooling_strategies(act_dir, concepts: dict,
         for c in concepts
     )
     fallback_rates = {s: _fallback_counts[s] / max(total_passages, 1) for s in _fallback_counts}
-    _Path("results").mkdir(exist_ok=True)
-    with open("results/fallback_rates.json", "w") as _f:
-        _json.dump(fallback_rates, _f, indent=2)
+    if fallback_accumulator is not None:
+        fallback_accumulator.setdefault("counts", {s: 0 for s in _fallback_counts})
+        fallback_accumulator["total"] = fallback_accumulator.get("total", 0) + total_passages
+        for s, count in _fallback_counts.items():
+            fallback_accumulator["counts"][s] = fallback_accumulator["counts"].get(s, 0) + count
+    else:
+        _Path("results").mkdir(exist_ok=True)
+        with open("results/fallback_rates.json", "w") as _f:
+            _json.dump(fallback_rates, _f, indent=2)
     for s, rate in fallback_rates.items():
         if rate > 0.3:
             print(f"  [WARN] {s} fallback rate {rate:.1%} > 30% — strategy is effectively mean pooling")
@@ -592,6 +665,7 @@ def compute_pooled_vectors(
     strategy_id: str,
     tokenizer=None,
     unigram_probs: dict | None = None,
+    concept_probe=None,
     dep_triggers: list | None = None,
 ) -> np.ndarray:
     """
@@ -644,7 +718,7 @@ def compute_pooled_vectors(
             elif strategy_id == "S2_SIF":
                 vec = pool_fn(h, tids, unigram_probs) if (unigram_probs and tids) else pool_mean(h)
             elif strategy_id == "S3_ITI_exact":
-                vec = pool_fn(h, attn, concept_probe=None)   # no probe at SCP stage
+                vec = pool_fn(h, attn, concept_probe=concept_probe)
             else:
                 vec = pool_fn(h)
         except Exception:

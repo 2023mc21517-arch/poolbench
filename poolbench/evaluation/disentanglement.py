@@ -68,14 +68,16 @@ def _compute_steering_vector(
     layer_idx: int,
     concept_name: str,
     strategy_id: str,
+    unigram_probs: dict | None = None,
+    concept_probe=None,
 ) -> Optional[np.ndarray]:
     """DiffMean steering vector for a (concept, strategy) pair. Returns unit-normalised (d_model,)."""
     from poolbench.extract_activations import load_activations  # noqa: PLC0415
     from poolbench.pooling_strategies import (STRATEGY_REGISTRY,  # noqa: PLC0415
                                                compute_pooled_vectors)
 
-    pos_acts = load_activations(act_dir, model_name, layer_idx, concept_name, "pos")
-    neg_acts = load_activations(act_dir, model_name, layer_idx, concept_name, "neg")
+    pos_acts = load_activations(act_dir, model_name, layer_idx, concept_name, "pos", partition="train")
+    neg_acts = load_activations(act_dir, model_name, layer_idx, concept_name, "neg", partition="train")
     if pos_acts is None or neg_acts is None:
         return None
 
@@ -83,8 +85,12 @@ def _compute_steering_vector(
         return None
 
     try:
-        pos_vecs = compute_pooled_vectors(pos_acts, strategy_id)
-        neg_vecs = compute_pooled_vectors(neg_acts, strategy_id)
+        pos_vecs = compute_pooled_vectors(pos_acts, strategy_id,
+                          unigram_probs=unigram_probs,
+                          concept_probe=concept_probe)
+        neg_vecs = compute_pooled_vectors(neg_acts, strategy_id,
+                          unigram_probs=unigram_probs,
+                          concept_probe=concept_probe)
     except Exception:
         return None
 
@@ -175,9 +181,19 @@ def compute_disentanglement_for_model(
         _generate_with_steering, EVAL_PROMPTS, SCP_ALPHAS,
     )
     from poolbench.evaluation.classifier_b import load_classifier_b, score_texts  # noqa: PLC0415
+    from poolbench.concepts import CONCEPTS  # noqa: PLC0415
+    from poolbench.pooling_strategies import (  # noqa: PLC0415
+        build_unigram_probs_from_activations, build_iti_concept_probes,
+    )
 
     model, tokenizer = _load_model(model_name, hf_id, device)
     log.info(f"  [d3] {model_name} loaded  GPU: {gpu_mem_str(device)}")
+    layer_act_dir = Path(act_dir) / model_name / f"layer_{best_layer}"
+    artefact_concepts = sorted(set(concepts) | {v for c in concepts for v in NEIGHBOUR_PAIRS.get(c, {}).values()})
+    concepts_meta = {c: CONCEPTS[c] for c in artefact_concepts if c in CONCEPTS}
+    unigram_probs = build_unigram_probs_from_activations(layer_act_dir, concepts_meta, partition="train")
+    concept_probes = build_iti_concept_probes(layer_act_dir, concepts_meta, partition="train")
+    log.info(f"  [d3] S2 unigram vocab={len(unigram_probs)}  S3 ITI probes={len(concept_probes)}")
 
     for concept_name in concepts:
         if concept_name in all_d3:
@@ -201,7 +217,11 @@ def compute_disentanglement_for_model(
         # Use first available steering vector — alpha=0 means it has zero effect.
         _first_sv: np.ndarray | None = None
         for _sid in strategy_ids:
-            _sv = _compute_steering_vector(act_dir, model_name, best_layer, concept_name, _sid)
+            _sv = _compute_steering_vector(
+                act_dir, model_name, best_layer, concept_name, _sid,
+                unigram_probs=unigram_probs,
+                concept_probe=concept_probes.get(concept_name),
+            )
             if _sv is not None:
                 _first_sv = _sv
                 break
@@ -228,7 +248,11 @@ def compute_disentanglement_for_model(
                 continue
 
             # ── Compute steering vector for concept A ──
-            sv_a = _compute_steering_vector(act_dir, model_name, best_layer, concept_name, strat_id)
+            sv_a = _compute_steering_vector(
+                act_dir, model_name, best_layer, concept_name, strat_id,
+                unigram_probs=unigram_probs,
+                concept_probe=concept_probes.get(concept_name),
+            )
             if sv_a is None:
                 concept_d3[strat_id] = {"D3_LD": None, "D3_LC": None,
                                          "D3_rep_LD": None, "D3_rep_LC": None}
@@ -262,8 +286,16 @@ def compute_disentanglement_for_model(
             d3_lc = _disent(delta_b_lc)
 
             # ── D3_rep — cosine similarity of steering vectors ──
-            sv_ld = _compute_steering_vector(act_dir, model_name, best_layer, ld_concept, strat_id)
-            sv_lc = _compute_steering_vector(act_dir, model_name, best_layer, lc_concept, strat_id)
+            sv_ld = _compute_steering_vector(
+                act_dir, model_name, best_layer, ld_concept, strat_id,
+                unigram_probs=unigram_probs,
+                concept_probe=concept_probes.get(ld_concept),
+            )
+            sv_lc = _compute_steering_vector(
+                act_dir, model_name, best_layer, lc_concept, strat_id,
+                unigram_probs=unigram_probs,
+                concept_probe=concept_probes.get(lc_concept),
+            )
 
             d3_rep_ld = round(_cosine_sim(sv_a, sv_ld), 5) if sv_ld is not None else None
             d3_rep_lc = round(_cosine_sim(sv_a, sv_lc), 5) if sv_lc is not None else None
