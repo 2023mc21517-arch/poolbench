@@ -493,11 +493,20 @@ def compute_prompted_baseline(
     if missing_prompts:
         raise RuntimeError(f"Missing curated prompted-baseline prompts for: {missing_prompts}")
 
-    baseline_results: dict[str, float | dict] = {
-        "_metadata": {"prompt_set": PROMPTED_BASELINE_PROMPT_SET}
-    }
+    if out_path.exists():
+        with open(out_path) as f:
+            existing = json.load(f)
+        if existing.get("_metadata", {}).get("prompt_set") == PROMPTED_BASELINE_PROMPT_SET:
+            baseline_results: dict[str, float | dict] = existing
+        else:
+            baseline_results = {"_metadata": {"prompt_set": PROMPTED_BASELINE_PROMPT_SET}}
+    else:
+        baseline_results = {"_metadata": {"prompt_set": PROMPTED_BASELINE_PROMPT_SET}}
 
     for concept_name in concepts:
+        if concept_name in baseline_results:
+            log.info(f"    prompted baseline {concept_name}: already done — skipping")
+            continue
         prefix = prompts[concept_name]
         prompted = [prefix + p for p in EVAL_PROMPTS]
 

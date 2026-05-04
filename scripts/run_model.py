@@ -206,6 +206,29 @@ def _write_extraction_manifest(model_name: str, candidate_layers: list[int],
     log.info(f"  [extract] manifest saved → {manifest_path}")
 
 
+def _concepts_present_in_auroc(layer_results: dict) -> list[str]:
+    """Infer concept names present in an AUROC result dict keyed concept_strategy."""
+    concepts: set[str] = set()
+    for key in layer_results:
+        for strategy_id in RANKED_STRATEGIES:
+            suffix = f"_{strategy_id}"
+            if key.endswith(suffix):
+                concepts.add(key[:-len(suffix)])
+                break
+    return sorted(concepts)
+
+
+def _merge_auroc_results(existing: dict | None, new: dict, concepts_to_replace: list[str]) -> dict:
+    """Merge per-concept AUROC results while replacing stale entries for the current concepts."""
+    merged = dict(existing or {})
+    prefixes = tuple(f"{concept}_" for concept in concepts_to_replace)
+    for key in list(merged):
+        if key.startswith(prefixes):
+            merged.pop(key, None)
+    merged.update(new)
+    return merged
+
+
 # ── Step 1: Extract activations ───────────────────────────────────────────────
 
 def step_extract(model_name: str, device: str, skip_existing: bool = True,
@@ -331,6 +354,10 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
             out_dir              = layer_auroc_dir,
             construction_method  = construction_method,
         )
+        if concept_filter is not None:
+            auroc_res = _merge_auroc_results(existing_layer, auroc_res, list(concepts_to_run))
+            with open(layer_out_path, "w") as f:
+                json.dump(auroc_res, f, indent=2)
         per_layer_results[layer_idx] = auroc_res
 
     fallback_out = AUROC_DIR / model_name / "fallback_rates.json"
@@ -343,7 +370,22 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
         json.dump({"rates": fallback_rates, **fallback_accumulator}, f, indent=2)
     log.info(f"  [pool] aggregate fallback rates saved → {fallback_out}")
 
-    best_layer = _select_methodology_layer(per_layer_results, cfg["candidate_layers"], list(concepts_to_run))
+    if concept_filter is not None and existing_summary is not None:
+        existing_per_layer = {
+            int(k): v for k, v in existing_summary.get("per_layer", {}).items()
+        }
+        for layer_idx, layer_res in per_layer_results.items():
+            existing_per_layer[layer_idx] = _merge_auroc_results(
+                existing_per_layer.get(layer_idx), layer_res, list(concepts_to_run)
+            )
+        per_layer_results = existing_per_layer
+
+    layer_selection_concepts = sorted({
+        concept
+        for layer_res in per_layer_results.values()
+        for concept in _concepts_present_in_auroc(layer_res)
+    }) or list(concepts_to_run)
+    best_layer = _select_methodology_layer(per_layer_results, cfg["candidate_layers"], layer_selection_concepts)
     log.info(f"\n  Best layer (methodology mean over representative concepts × mean/last/max): {best_layer}")
 
     # Save the best-layer results as the primary leaderboard input
@@ -792,7 +834,7 @@ def step_prompted_baseline(
             if not missing:
                 log.info(f"  [checkpoint] Prompted baseline already complete → {out_path}; skipping")
                 return existing or {}
-            raise RuntimeError(f"Prompted baseline checkpoint is incomplete: missing {missing}")
+            log.info(f"  [checkpoint] Prompted baseline missing {len(missing)} concept(s) — resuming")
 
     with log_step(log, f"Step 6b prompted baseline  model={model_name}", device):
         return compute_prompted_baseline(

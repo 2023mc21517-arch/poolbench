@@ -315,8 +315,13 @@ def extract_activations_for_model(
     out_dir            = Path(out_dir)
     model, tokenizer   = load_model(model_name, hf_id, device=device)
 
+    if (concept_corpus_dir / "train_pos.jsonl").exists():
+        concept_dirs = [concept_corpus_dir]
+    else:
+        concept_dirs = [d for d in sorted(concept_corpus_dir.iterdir()) if d.is_dir()]
+
     n_layers   = len(candidate_layers)
-    n_concepts = sum(1 for d in concept_corpus_dir.iterdir() if d.is_dir())
+    n_concepts = len(concept_dirs)
     log.info(f"  [extract] {model_name}: {n_layers} layers × {n_concepts} concepts  "
              f"batch={batch_size}  GPU: {gpu_mem_str(device)}")
 
@@ -325,9 +330,7 @@ def extract_activations_for_model(
         layer_dir.mkdir(parents=True, exist_ok=True)
         log.info(f"  [extract] Layer {layer_idx}  GPU: {gpu_mem_str(device)}")
 
-        for concept_dir in sorted(concept_corpus_dir.iterdir()):
-            if not concept_dir.is_dir():
-                continue
+        for concept_dir in concept_dirs:
             concept_name = concept_dir.name
 
             for split in ("pos", "neg"):
