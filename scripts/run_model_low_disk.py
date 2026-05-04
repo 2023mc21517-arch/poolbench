@@ -72,7 +72,7 @@ def cleanup_concept_activations(model_name: str, layers: list[int], concepts: se
 
 
 def extract_concept_layers(model_name: str, concept: str, layers: list[int], device: str,
-                           skip_existing: bool) -> None:
+                           skip_existing: bool, batch_size: int | None = None) -> None:
     cfg = MODEL_CONFIGS[model_name]
     extract_activations_for_model(
         model_name=model_name,
@@ -80,7 +80,7 @@ def extract_concept_layers(model_name: str, concept: str, layers: list[int], dev
         concept_corpus_dir=CORPUS_DIR / concept,
         out_dir=ACT_DIR,
         candidate_layers=layers,
-        batch_size=cfg["batch_size"],
+        batch_size=batch_size or cfg["batch_size"],
         device=device,
         skip_existing=skip_existing,
         activation_save_dtype="float16",
@@ -165,16 +165,18 @@ def reset_model_outputs(model_name: str) -> None:
     log.info(f"[reset] removed old outputs for {model_name}")
 
 
-def run_low_disk(model_name: str, device: str, skip_scp: bool, force: bool) -> None:
+def run_low_disk(model_name: str, device: str, skip_scp: bool, force: bool,
+                 batch_size: int | None = None) -> None:
     cfg = MODEL_CONFIGS[model_name]
     candidate_layers = list(cfg["candidate_layers"])
+    effective_batch_size = batch_size or cfg["batch_size"]
 
     if force:
         reset_model_outputs(model_name)
 
     log.info("=" * 60)
     log.info(f"LOW-DISK PoolBench run: model={model_name} device={device}")
-    log.info(f"candidate_layers={candidate_layers} GPU={gpu_mem_str(device)}")
+    log.info(f"candidate_layers={candidate_layers} batch_size={effective_batch_size} GPU={gpu_mem_str(device)}")
     log.info("=" * 60)
 
     # Pass A: extract one concept at one candidate layer, compute that layer's
@@ -184,7 +186,9 @@ def run_low_disk(model_name: str, device: str, skip_scp: bool, force: bool) -> N
         log.info(f"\n=== Low-disk D1 pass: {concept} ===")
         for layer_idx in candidate_layers:
             log.info(f"\n--- Low-disk D1 layer pass: concept={concept} layer={layer_idx} ---")
-            extract_concept_layers(model_name, concept, [layer_idx], device, skip_existing=not force)
+            extract_concept_layers(model_name, concept, [layer_idx], device,
+                                   skip_existing=not force,
+                                   batch_size=effective_batch_size)
             pool_one_concept_layer(model_name, concept, layer_idx, force=force)
             cleanup_concept_activations(model_name, [layer_idx], {concept})
             free_gpu_memory(device)
@@ -206,7 +210,9 @@ def run_low_disk(model_name: str, device: str, skip_scp: bool, force: bool) -> N
             needed.update(neighbours.values())
         log.info(f"\n=== Low-disk metric pass: target={concept} temp_activations={sorted(needed)} ===")
         for needed_concept in sorted(needed):
-            extract_concept_layers(model_name, needed_concept, [best_layer], device, skip_existing=True)
+            extract_concept_layers(model_name, needed_concept, [best_layer], device,
+                                   skip_existing=True,
+                                   batch_size=effective_batch_size)
 
         step_linearity(model_name, best_layer, concept_filter=concept, skip_existing=not force)
         step_keyword_ablation(model_name, best_layer, device, concept_filter=concept, skip_existing=not force)
@@ -229,6 +235,8 @@ def main() -> None:
     parser.add_argument("--min_free_gb", type=float, default=35.0)
     parser.add_argument("--skip_scp", action="store_true", help="Skip D2 SCP, prompted baseline, and D3")
     parser.add_argument("--force", action="store_true", help="Delete old model outputs before running")
+    parser.add_argument("--batch_size", type=int, default=None,
+                        help="Override model extraction batch size; use 1-2 on A100 40GB")
     args = parser.parse_args()
 
     device = args.device
@@ -241,7 +249,8 @@ def main() -> None:
             )
     elif device == "cpu" and args.model not in {"bert_base_uncased"}:
         raise RuntimeError("Refusing to run a large PoolBench model on CPU; choose a CUDA device.")
-    run_low_disk(args.model, device, skip_scp=args.skip_scp, force=args.force)
+    run_low_disk(args.model, device, skip_scp=args.skip_scp, force=args.force,
+                 batch_size=args.batch_size)
 
 
 if __name__ == "__main__":
