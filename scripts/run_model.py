@@ -49,7 +49,7 @@ from poolbench.probe_training       import (compute_all_auroc, check_linearity_a
                                       compute_layer_icc, nemenyi_strategy_significance,
                                       build_nemenyi_auroc_matrix)
 from poolbench.extract_activations  import extract_activations_for_model, load_activations
-from poolbench.logger               import get_logger, gpu_mem_str, free_gpu_memory, log_step
+from poolbench.logger               import get_logger, gpu_mem_str, free_gpu_memory, log_step, find_free_gpu
 
 
 # ── Model configs ─────────────────────────────────────────────────────────────
@@ -644,8 +644,10 @@ def main():
                         help="Run all 7 models sequentially")
     parser.add_argument("--concept",  type=str, default=None,
                         help="Restrict to a single concept (for testing)")
-    parser.add_argument("--device",   type=str, default="cuda:0",
-                        help="Torch device, e.g. cuda:0 or cpu")
+    parser.add_argument("--device",   type=str, default="auto",
+                        help="Torch device, e.g. cuda:0, cpu, or 'auto' (scan and pick freest GPU)")
+    parser.add_argument("--min_free_gb", type=float, default=20.0,
+                        help="When --device auto: minimum free VRAM (GB) to consider a GPU usable (default 20)")
     parser.add_argument("--skip_extraction", action="store_true",
                         help="Skip activation extraction (assume already done)")
     parser.add_argument("--skip_scp", action="store_true",
@@ -657,6 +659,18 @@ def main():
     parser.add_argument("--construction_method", type=str, default=DEFAULT_CONSTRUCTION,
                         help="Construction method (C1–C5)")
     args = parser.parse_args()
+
+    # ── Resolve device ──────────────────────────────────────────────────────
+    if args.device == "auto":
+        log.info("\n[device] --device auto: scanning all GPUs for the freest one...")
+        try:
+            args.device = find_free_gpu(min_free_gb=args.min_free_gb, logger=log)
+            log.info(f"[device] AUTO-SELECTED: {args.device}")
+        except RuntimeError as exc:
+            log.error(f"[device] {exc}")
+            raise SystemExit(1) from exc
+    else:
+        log.info(f"[device] Using explicitly requested device: {args.device}")
 
     if args.nemenyi_only:
         # Load saved best-layer AUROC from all models
