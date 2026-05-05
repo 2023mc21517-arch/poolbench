@@ -601,14 +601,31 @@ def step_nemenyi(all_model_auroc_results: dict[str, dict],
     concepts = CONCEPT_NAMES if concept_filter is None else [concept_filter]
     models   = list(all_model_auroc_results.keys())
 
+    # §39: exclude concepts that fail the linearity check (gap ≥ 0.03) in ANY model
+    # from the cross-concept mean AUROC that determines leaderboard rank.
+    linearity_failed: set[str] = set()
+    for model_name in models:
+        lin_path = LINEARITY_DIR / f"{model_name}_linearity.json"
+        lin_data = _safe_load_json(lin_path)
+        if lin_data:
+            linearity_failed.update(c for c, r in lin_data.items() if not r.get("passes", True))
+    if linearity_failed:
+        excluded_sorted = sorted(linearity_failed)
+        log.warning(f"  [linearity] Excluding {len(linearity_failed)} concept(s) flagged ⊗ "
+                    f"from Nemenyi matrix: {excluded_sorted}")
+        concepts = [c for c in concepts if c not in linearity_failed]
+
     # Checkpoint guard: skip if output exists and covers exactly the same models
+    # and the same linearity-excluded set (recompute if exclusions changed).
     out_path = NEMENYI_DIR / "nemenyi_strategy_significance.json"
     if skip_existing and out_path.exists():
         existing = _safe_load_json(out_path)
-        if existing and sorted(existing.get("models", [])) == sorted(models):
+        if (existing
+                and sorted(existing.get("models", [])) == sorted(models)
+                and sorted(existing.get("linearity_excluded_concepts", [])) == sorted(linearity_failed)):
             log.info(f"  [checkpoint] Step 9 already complete for models {models} → {out_path}; skipping")
             return
-        log.info(f"  [checkpoint] Step 9 output exists but model set changed — recomputing")
+        log.info(f"  [checkpoint] Step 9 output exists but model set or linearity exclusions changed — recomputing")
     effective_n = 0.0
     for model_name in models:
         icc_path = ICC_DIR / f"{model_name}_icc.json"
@@ -636,6 +653,7 @@ def step_nemenyi(all_model_auroc_results: dict[str, dict],
     result_serialisable["nemenyi_pvalues"] = result["nemenyi_pvalues"].tolist() \
         if isinstance(result.get("nemenyi_pvalues"), np.ndarray) else None
     result_serialisable["models"] = sorted(models)  # used by checkpoint guard on re-run
+    result_serialisable["linearity_excluded_concepts"] = sorted(linearity_failed)  # for compile_results
 
     out_path = NEMENYI_DIR / "nemenyi_strategy_significance.json"
     with open(out_path, "w") as f:
