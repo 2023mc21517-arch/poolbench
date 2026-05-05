@@ -1116,6 +1116,21 @@ def main():
     if args.all and not args.linearity_only:
         step_nemenyi(all_auroc_results, concept_filter=args.concept)
 
+    # Run layer rank correlation analysis after each model (or all models)
+    if not args.linearity_only and not args.nemenyi_only:
+        try:
+            import importlib.util as _ilu, sys as _sys
+            _script = Path(__file__).parent / "layer_rank_correlation.py"
+            _spec = _ilu.spec_from_file_location("layer_rank_correlation", _script)
+            _mod  = _ilu.module_from_spec(_spec)
+            _spec.loader.exec_module(_mod)
+            log.info("\n[layer_rank_corr] Running layer rank correlation analysis...")
+            _sys.argv = ["layer_rank_correlation", "--results_dir", str(AUROC_DIR),
+                         "--output", str(RESULTS_DIR / "layer_rank_correlation.png")]
+            _mod.main()
+        except Exception as exc:
+            log.warning(f"[layer_rank_corr] Non-fatal: {exc}")
+
     log.info("\nAll models done.")
 
 
