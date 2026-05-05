@@ -22,6 +22,16 @@ from types import SimpleNamespace
 def _nlp():
     return spacy.load("en_core_web_sm", disable=["lemmatizer"])
 
+# Per-call doc cache: populated via nlp.pipe() before strategy loop so that
+# L1/L2/L3/L5 all hit the cache instead of each re-parsing every text.
+_doc_cache: dict[str, object] = {}
+
+def _parse_cached(text: str):
+    """Return spaCy doc for text, reusing cache populated by nlp.pipe()."""
+    if text not in _doc_cache:
+        _doc_cache[text] = _nlp()(text)
+    return _doc_cache[text]
+
 
 # ── POSITION-ANCHORED ────────────────────────────────────────────────────────
 
@@ -226,7 +236,7 @@ def pool_POS_filtered(h: np.ndarray, text: str, offset_mapping: list) -> np.ndar
     Uses char-offset alignment between spaCy tokens and HuggingFace subword tokens.
     Falls back to pool_mean if no content-POS tokens found.
     """
-    doc = _nlp()(text)
+    doc = _parse_cached(text)
     content_pos = {"NOUN", "VERB", "ADJ", "ADV"}
     mask = [tok.pos_ in content_pos for tok in doc]
     aligned = _align_spacy_to_hf(mask, doc, offset_mapping, len(h))
@@ -243,7 +253,7 @@ def pool_dependency_relation(h: np.ndarray, text: str, concept_triggers: list[st
     clause/modifier role (advcl, prep, mark, cc, conj, acl).
     Falls back to pool_mean if no relevant tokens found.
     """
-    doc = _nlp()(text)
+    doc = _parse_cached(text)
     relevant_spacy_idx = []
     for token in doc:
         if token.dep_ in ("advcl", "prep", "mark", "cc", "conj", "acl"):
@@ -263,7 +273,7 @@ def pool_named_entity(h: np.ndarray, text: str, offset_mapping: list) -> np.ndar
     L3 — Pool only named entity tokens.
     Falls back to pool_mean if no named entities found.
     """
-    doc = _nlp()(text)
+    doc = _parse_cached(text)
     ne_spacy_idx = [tok.i for tok in doc if tok.ent_type_]
     if not ne_spacy_idx:
         return pool_mean(h)
@@ -359,7 +369,7 @@ def pool_SVO(h: np.ndarray, text: str, offset_mapping: list) -> np.ndarray:
     Falls back to pool_mean if no SVO tokens are found (logs every fallback).
     Citation motivation: Fader et al., ReVerb, EMNLP 2011.
     """
-    doc = _nlp()(text)
+    doc = _parse_cached(text)
     svo_deps = {"nsubj", "nsubjpass", "obj", "dobj", "ROOT"}
     svo_spacy_idx = [tok.i for tok in doc if tok.dep_ in svo_deps]
 
@@ -642,6 +652,15 @@ def compute_all_pooling_strategies(act_dir, concepts: dict,
         pos_acts = np.load(pos_path, allow_pickle=True)
         neg_acts = np.load(neg_path, allow_pickle=True)
         dep_triggers = concept_meta.get("dep_triggers") or concept_meta.get("seed_words", [])
+
+        # Pre-parse all texts for this concept in one nlp.pipe() call.
+        # L1/L2/L3/L5 each called _nlp()(text) independently — 4x redundant.
+        # Now they all hit _parse_cached() which returns the pre-computed doc.
+        _spacy_texts = [item.get("text", "") for item in list(pos_acts) + list(neg_acts)]
+        _unique_texts = list(dict.fromkeys(_spacy_texts))  # dedup, order-preserving
+        _doc_cache.clear()
+        for _txt, _doc in zip(_unique_texts, _nlp().pipe(_unique_texts, batch_size=64, n_process=1)):
+            _doc_cache[_txt] = _doc
 
         for strategy_id in STRATEGY_REGISTRY:
             if strategy_id in OFF_LEADERBOARD:
