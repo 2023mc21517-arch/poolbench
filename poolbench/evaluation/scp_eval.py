@@ -488,7 +488,7 @@ def compute_scp_for_model(
     layer_act_dir = Path(act_dir) / model_name / f"layer_{best_layer}"
     concepts_meta = {c: CONCEPTS[c] for c in concepts if c in CONCEPTS}
     unigram_probs = build_unigram_probs_from_activations(layer_act_dir, concepts_meta, partition="train")
-    concept_probes = build_iti_concept_probes(layer_act_dir, concepts_meta, partition="train")
+    concept_probes = build_iti_concept_probes(layer_act_dir, concepts_meta, partition="train", device=device)
     log.info(f"  [scp] S2 unigram vocab={len(unigram_probs)}  S3 ITI probes={len(concept_probes)}")
 
     for concept_name in concepts:

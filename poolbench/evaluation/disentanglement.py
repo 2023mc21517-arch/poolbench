@@ -213,7 +213,7 @@ def compute_disentanglement_for_model(
     artefact_concepts = sorted(set(concepts) | {v for c in concepts for v in NEIGHBOUR_PAIRS.get(c, {}).values()})
     concepts_meta = {c: CONCEPTS[c] for c in artefact_concepts if c in CONCEPTS}
     unigram_probs = build_unigram_probs_from_activations(layer_act_dir, concepts_meta, partition="train")
-    concept_probes = build_iti_concept_probes(layer_act_dir, concepts_meta, partition="train")
+    concept_probes = build_iti_concept_probes(layer_act_dir, concepts_meta, partition="train", device=device)
     log.info(f"  [d3] S2 unigram vocab={len(unigram_probs)}  S3 ITI probes={len(concept_probes)}")
 
     for concept_name in concepts:
@@ -355,6 +355,7 @@ def _compute_rep_only(
     act_dir: str | Path,
     out_dir: str | Path,
     skip_existing: bool,
+    device: str = "cpu",
 ) -> dict:
     """
     Compute only D3_rep (cosine similarity) — used for BERT/FLAN-T5 which
@@ -387,7 +388,7 @@ def _compute_rep_only(
     artefact_concepts = sorted(set(concepts) | {v for c in concepts for v in NEIGHBOUR_PAIRS.get(c, {}).values()})
     concepts_meta = {c: CONCEPTS[c] for c in artefact_concepts if c in CONCEPTS}
     unigram_probs = build_unigram_probs_from_activations(layer_act_dir, concepts_meta, partition="train")
-    concept_probes = build_iti_concept_probes(layer_act_dir, concepts_meta, partition="train")
+    concept_probes = build_iti_concept_probes(layer_act_dir, concepts_meta, partition="train", device=device)
 
     for concept_name in concepts:
         if concept_name not in NEIGHBOUR_PAIRS:
