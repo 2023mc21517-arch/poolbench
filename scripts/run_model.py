@@ -427,32 +427,6 @@ def _select_methodology_layer(per_layer_results: dict[int, dict],
     return max(layer_scores, key=layer_scores.get)
 
 
-def _select_modal_layer(per_layer_results: dict[int, dict],
-                        candidate_layers: list[int]) -> int:
-    """
-    For each strategy × concept, record which layer achieves highest AUROC.
-    Return the modal best layer (most frequent winner).
-    """
-    from collections import Counter  # noqa: PLC0415
-    winner_counts: Counter = Counter()
-
-    all_keys = set()
-    for _, res in per_layer_results.items():
-        all_keys.update(res.keys())
-
-    for key in all_keys:
-        best_auroc = -1.0
-        best_layer = candidate_layers[0]
-        for layer, res in per_layer_results.items():
-            auroc = res.get(key, {}).get("auroc", 0.0)
-            if auroc > best_auroc:
-                best_auroc = auroc
-                best_layer = layer
-        winner_counts[best_layer] += 1
-
-    return winner_counts.most_common(1)[0][0] if winner_counts else candidate_layers[-1]
-
-
 # ── Step 3: Linearity validation (D3) ────────────────────────────────────────
 
 def step_linearity(model_name: str, best_layer: int,

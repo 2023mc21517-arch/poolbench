@@ -8,10 +8,10 @@
   "ci_half_width_held_out": 0.0189,
   "ci_half_width_cv_fold": 0.0276,
   "pre_committed_mde": 0.05,
-  "evaluation_design": "held_out_test",
+  "evaluation_design": "5fold_oof_on_train",
   "mde_met": true,
-  "recommendation": "SUFFICIENT for held-out test (n=300, CI half=0.019). 5-fold CV (n=140, CI half=0.028) is marginal; primary AUROC reporting uses held-out test set.",
-  "note": "Primary evaluation uses the 300-sample held-out test split. If 5-fold CV on training data is used for any comparison, increase corpus to 1000/class.",
+  "recommendation": "5-fold OOF CV on train split (n=700/class, fold test n=140, CI half±0.028) is the primary AUROC protocol. The 300-sample held-out test split is reserved for Classifier A quality check (§53).",
+  "note": "Primary D1 AUROC uses 5-fold OOF CV on the 700-sample training split. The 300-sample held-out test split is reserved for Classifier A quality check (§53). CI half-width for CV: ±0.028 per fold (n=140); cross-concept CI: ±0.010 (n=17 concepts).",
 
   "nemenyi_power": {
     "n_concepts": 17,
