@@ -84,6 +84,26 @@ MODEL_CONFIGS: dict[str, dict] = {
     },
 }
 
+
+def _apply_runtime_model_config_overrides() -> None:
+    """Allow safe runtime overrides (for example, bigger H100 extraction batches)."""
+    global_override = os.environ.get("POOLBENCH_BATCH_SIZE")
+    for model_name, cfg in MODEL_CONFIGS.items():
+        specific_key = f"POOLBENCH_BATCH_SIZE_{model_name.upper()}"
+        override = os.environ.get(specific_key, global_override)
+        if override is None:
+            continue
+        try:
+            batch_size = int(override)
+        except ValueError as exc:
+            raise ValueError(f"Invalid {specific_key}={override!r}; expected integer") from exc
+        if batch_size < 1:
+            raise ValueError(f"Invalid {specific_key}={override!r}; must be >= 1")
+        cfg["batch_size"] = batch_size
+
+
+_apply_runtime_model_config_overrides()
+
 BASE_DIR      = Path(__file__).parent.parent
 RESULTS_DIR   = Path(os.environ.get("POOLBENCH_RESULTS_DIR", BASE_DIR / "results"))
 ACT_DIR       = RESULTS_DIR / "activations"
