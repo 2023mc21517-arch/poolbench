@@ -45,9 +45,9 @@ dev = [
 all = ["poolbench[sae,dev]"]
 
 [project.urls]
-Homepage      = "https://github.com/poolbench-anon/poolbench"
-Repository    = "https://github.com/poolbench-anon/poolbench"
-"Bug Tracker" = "https://github.com/poolbench-anon/poolbench/issues"
+Homepage      = "https://github.com/2023mc21517-arch/poolbench"
+Repository    = "https://github.com/2023mc21517-arch/poolbench"
+"Bug Tracker" = "https://github.com/2023mc21517-arch/poolbench/issues"
 Paper         = "https://arxiv.org/abs/XXXX.XXXXX"
 
 [tool.hatch.build.targets.wheel]

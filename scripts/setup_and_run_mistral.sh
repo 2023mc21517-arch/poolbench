@@ -8,6 +8,7 @@ set -euo pipefail
 
 # ── 0. Config — override with env vars if needed ────────────
 REPO_URL="${REPO_URL:-https://github.com/2023mc21517-arch/poolbench.git}"
+HF_DATASET_ID="${HF_DATASET_ID:-nips234678/poolbench}"
 HF_TOKEN="${HF_TOKEN:-}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 # ────────────────────────────────────────────────────────────
@@ -86,6 +87,14 @@ export POOLBENCH_RESULTS_DIR="$REPO_DIR/results"
 export HF_HUB_ENABLE_HF_TRANSFER=1         # faster HF downloads if hf_transfer is installed
 pip install --quiet hf_transfer 2>/dev/null || true
 
+if [[ ! -f "$REPO_DIR/data/corpora/hedging/train_pos.jsonl" ]]; then
+    echo "[3/7] Corpus not found locally — downloading data/corpora from $HF_DATASET_ID ..."
+    huggingface-cli download "$HF_DATASET_ID" \
+        --repo-type dataset \
+        --include "data/corpora/**" \
+        --local-dir "$REPO_DIR"
+fi
+
 # ── 4. Disk / VRAM check ─────────────────────────────────────
 echo "[4/7] Pre-flight checks..."
 DISK_FREE_GB=$(df -BG "$REPO_DIR" | awk 'NR==2{gsub("G",""); print $4}')
@@ -116,7 +125,7 @@ if len(present) < len(CONCEPT_NAMES):
     raise SystemExit(
         "Corpus missing or incomplete under data/corpora.\n"
         "Download it with:\n"
-        "  huggingface-cli download poolbench-anon/poolbench --repo-type dataset --include 'data/corpora/**' --local-dir .\n"
+        "  huggingface-cli download nips234678/poolbench --repo-type dataset --include 'data/corpora/**' --local-dir .\n"
         "or rebuild it with:\n"
         "  python scripts/dataset_builder.py --all"
     )

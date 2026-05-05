@@ -83,7 +83,7 @@ poolbench/
 ### 1. Install
 
 ```bash
-git clone https://github.com/poolbench-anon/poolbench.git
+git clone https://github.com/2023mc21517-arch/poolbench.git
 cd poolbench
 pip install -e ".[dev]"
 ```
@@ -97,7 +97,7 @@ All corpus JSONL files, activation `.npy` files, and paper results are released 
 pip install huggingface_hub
 
 # Download everything (corpus + activations + results)
-huggingface-cli download poolbench-anon/poolbench --repo-type dataset --local-dir .
+huggingface-cli download nips234678/poolbench --repo-type dataset --local-dir .
 ```
 
 This populates:
@@ -118,7 +118,7 @@ You can also load the corpus directly in Python:
 
 ```python
 from datasets import load_dataset
-ds = load_dataset("poolbench-anon/poolbench", name="hedging")
+ds = load_dataset("nips234678/poolbench", name="hedging")
 ```
 
 > **Rebuilding from source (optional — for verification or new models):**
@@ -228,7 +228,7 @@ Pre-built artifacts (corpus, activations, results) are on HuggingFace — you do
 
 ```bash
 # 1. Download artifacts
-huggingface-cli download poolbench-anon/poolbench --repo-type dataset --local-dir .
+huggingface-cli download nips234678/poolbench --repo-type dataset --local-dir .
 
 # 2. Re-run probing only (fast — no GPU extraction needed)
 python scripts/run_model.py --all --skip_extraction
