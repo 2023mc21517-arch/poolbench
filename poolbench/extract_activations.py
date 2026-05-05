@@ -110,7 +110,7 @@ def load_model(model_name: str, hf_id: str, device: str = "cuda"):
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
     model_kwargs = {
-        "dtype": torch.bfloat16,
+        "torch_dtype": torch.bfloat16,
         "device_map": device,
         "trust_remote_code": True,
     }
