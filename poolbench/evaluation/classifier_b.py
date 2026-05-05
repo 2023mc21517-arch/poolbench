@@ -67,10 +67,10 @@ def _classifier_artifact_complete(save_dir: Path) -> bool:
 # pos_values: label values that correspond to the POSITIVE class
 ANCHOR_CONFIGS: dict[str, dict] = {
     "imdb_sentiment": {
-        "hf_id":     "yin001/imdb_dataset_positive_negative",
+        "hf_id":     "stanfordnlp/imdb",
         "config":    None,
         "split":     "train",
-        "text_col":  "review",
+        "text_col":  "text",
         "label_col": "label",
         "pos_values": [1, "positive", "POSITIVE"],
     },
@@ -84,19 +84,20 @@ ANCHOR_CONFIGS: dict[str, dict] = {
         "_custom_loader": "hedging",
     },
     "contrast": {
-        "hf_id":     "cestwc/conj_nli",
+        "hf_id":     "nyu-mll/multi_nli",
         "config":    None,
         "split":     "train",
-        "text_col":  "text",
-        "label_col": "relation",
-        "pos_values": ["adversative", "contrast", "ADVERSATIVE"],
+        "text_col":  "hypothesis",
+        "label_col": None,
+        "pos_values": [],
+        "_custom_loader": "contrast",
     },
     "narrative": {
-        "hf_id":     "wics/story_cloze",
-        "config":    "2016",
-        "split":     "validation",
-        "text_col":  "input_sentence_1",
-        "label_col": None,          # synthetic: all rows = narrative positive; negatives built ad-hoc
+        "hf_id":     "euclaise/writingprompts",
+        "config":    None,
+        "split":     "train",
+        "text_col":  "story",
+        "label_col": None,
         "pos_values": [],
         "_custom_loader": "narrative",
     },
@@ -119,12 +120,13 @@ ANCHOR_CONFIGS: dict[str, dict] = {
         "_custom_loader": "causation",
     },
     "conditionality": {
-        "hf_id":     "cestwc/conj_nli",
+        "hf_id":     "nyu-mll/multi_nli",
         "config":    None,
         "split":     "train",
-        "text_col":  "text",
-        "label_col": "relation",
-        "pos_values": ["contingency", "CONTINGENCY"],
+        "text_col":  "hypothesis",
+        "label_col": None,
+        "pos_values": [],
+        "_custom_loader": "conditionality",
     },
     "academic_tone": {
         "hf_id":     "osyvokon/pavlick-formality-scores",
@@ -136,31 +138,30 @@ ANCHOR_CONFIGS: dict[str, dict] = {
         "_threshold": 0.5,   # Pavlick score > 0.5 = formal (positive class)
     },
     "frustration": {
-        "hf_id":     "facebook/empathetic_dialogues",
+        "hf_id":     "dair-ai/emotion",
         "config":    None,
         "split":     "train",
-        "text_col":  "utterance",
-        "label_col": "context",
-        "pos_values": ["frustrated", "furious", "annoyed", "Frustrated", "Furious", "Annoyed"],
-        "_neg_values": ["excited", "joyful", "proud", "Excited", "Joyful", "Proud"],
+        "text_col":  "text",
+        "label_col": "label",
+        "pos_values": [3, "anger"],      # label 3 = anger (closest to frustration)
+        "_neg_values": [1, "joy"],
     },
     "negation_density": {
-        "hf_id":     "facebook/multi_nli",
+        "hf_id":     "nyu-mll/multi_nli",
         "config":    None,
-        "split":     "train_matched",
+        "split":     "train",
         "text_col":  "hypothesis",
         "label_col": "label",
         "pos_values": [2, "contradiction"],   # contradiction ≈ negation-dense
         "_neg_values": [0, "entailment"],
     },
     "numerical_precision": {
-        "hf_id":     "allenai/scitail",
-        "config":    "tsv_format",
+        "hf_id":     "gfissore/arxiv-abstracts-2021",
+        "config":    None,
         "split":     "train",
-        "text_col":  "sentence2",
-        "label_col": "gold_label",
-        "pos_values": ["entails"],
-        "_neg_values": ["neutral"],
+        "text_col":  "Abstracts",
+        "label_col": None,
+        "pos_values": [],
         "_custom_loader": "numerical_precision",
     },
     "depression": {
@@ -269,53 +270,52 @@ def _custom_load(concept: str, cfg: dict,
         from datasets import load_dataset  # noqa: PLC0415
 
         if concept == "narrative":
-            # story_cloze: all 4-sentence story sequences = positive (narrative)
-            # negatives: take individual factual Wikipedia sentences from text_datasets
+            # euclaise/writingprompts: story field = creative fiction (positive)
+            # gfissore/arxiv-abstracts-2021: scientific abstracts = factual prose (negative)
             ds = load_dataset(cfg["hf_id"], cfg.get("config"),
-                              split=cfg["split"])
+                              split=cfg["split"], streaming=True)
             pos_texts = []
             for row in ds:
-                # Concatenate the 4 input sentences as the passage
-                parts = [str(row.get(f"input_sentence_{i}", "")) for i in range(1, 5)]
-                text = " ".join(p for p in parts if p)
-                if text:
+                text = str(row.get("story", "")).strip()
+                # Use the first 400 chars to keep passages at a manageable length
+                text = text[:400].strip()
+                if len(text) >= 50:
                     pos_texts.append(text)
                 if len(pos_texts) >= max_per_class:
                     break
-            # For negatives, use wikipedia sentences (load a small slice)
             neg_texts = []
             try:
-                wiki_ds = load_dataset("wikipedia", "20220301.simple",
-                                       split="train", streaming=True)
-                for row in wiki_ds:
-                    sents = str(row.get("text", "")).split(".")
-                    for s in sents:
-                        s = s.strip()
-                        if 20 < len(s) < 400:
-                            neg_texts.append(s)
-                        if len(neg_texts) >= max_per_class:
-                            break
+                arxiv_ds = load_dataset("gfissore/arxiv-abstracts-2021",
+                                        split="train", streaming=True)
+                for row in arxiv_ds:
+                    text = str(row.get("Abstracts", "")).strip()
+                    if len(text) >= 50:
+                        neg_texts.append(text)
                     if len(neg_texts) >= max_per_class:
                         break
             except Exception as exc:
-                raise RuntimeError("narrative: could not load wikipedia negatives") from exc
+                raise RuntimeError("narrative: could not load arxiv negatives") from exc
             if len(pos_texts) < 50 or len(neg_texts) < 50:
                 raise RuntimeError(f"narrative anchor too small: pos={len(pos_texts)} neg={len(neg_texts)}")
             texts  = pos_texts[:max_per_class] + neg_texts[:max_per_class]
             labels = [1] * min(len(pos_texts), max_per_class) + [0] * min(len(neg_texts), max_per_class)
+            log.info(f"  [classifier_b] narrative anchor (writingprompts/arxiv): pos={len(pos_texts)} neg={len(neg_texts)}")
             return texts, labels
 
         elif concept == "numerical_precision":
-            # SciTail: entails = precision (has numeric content), neutral = imprecise
-            # Apply custom filter: ≥ 4 numeric tokens for positive, 0 for negative
+            # gfissore/arxiv-abstracts-2021: filter by numeric token count
+            # pos = ≥5 numeric tokens (empirical/quantitative abstracts)
+            # neg = 0 numeric tokens (theoretical/conceptual abstracts)
             import re  # noqa: PLC0415
             ds = load_dataset(cfg["hf_id"], cfg.get("config"),
-                              split=cfg["split"])
+                              split=cfg["split"], streaming=True)
             pos_texts, neg_texts = [], []
             for row in ds:
-                text = str(row.get(cfg["text_col"], "")).strip()
+                text = str(row.get("Abstracts", "")).strip()
+                if not text:
+                    continue
                 num_count = len(re.findall(r'\b\d+\.?\d*\b', text))
-                if num_count >= 4:
+                if num_count >= 5:
                     pos_texts.append(text)
                 elif num_count == 0:
                     neg_texts.append(text)
@@ -325,6 +325,68 @@ def _custom_load(concept: str, cfg: dict,
                 raise RuntimeError(f"numerical_precision anchor too small: pos={len(pos_texts)} neg={len(neg_texts)}")
             texts  = pos_texts[:max_per_class] + neg_texts[:max_per_class]
             labels = [1] * min(len(pos_texts), max_per_class) + [0] * min(len(neg_texts), max_per_class)
+            log.info(f"  [classifier_b] numerical_precision anchor (arxiv num_count≥5/=0): pos={len(pos_texts)} neg={len(neg_texts)}")
+            return texts, labels
+
+        elif concept == "contrast":
+            # nyu-mll/multi_nli: filter hypothesis for adversative vs causal connectives
+            import re as _re  # noqa: PLC0415
+            _ADV = _re.compile(
+                r'\b(but|however|although|though|yet|whereas|nevertheless|'
+                r'nonetheless|while|despite|in contrast|on the other hand|even though)\b',
+                _re.I)
+            _CAUS = _re.compile(
+                r'\b(therefore|thus|hence|because|since|as a result|consequently|'
+                r'so that|due to)\b',
+                _re.I)
+            ds = load_dataset(cfg["hf_id"], cfg.get("config"),
+                              split=cfg["split"], streaming=True)
+            pos_texts, neg_texts = [], []
+            for row in ds:
+                hyp = str(row.get("hypothesis", "")).strip()
+                if not hyp:
+                    continue
+                if _ADV.search(hyp):
+                    pos_texts.append(hyp)
+                elif _CAUS.search(hyp) and not _ADV.search(hyp):
+                    neg_texts.append(hyp)
+                if len(pos_texts) >= max_per_class and len(neg_texts) >= max_per_class:
+                    break
+            if len(pos_texts) < 50 or len(neg_texts) < 50:
+                raise RuntimeError(f"contrast anchor too small: pos={len(pos_texts)} neg={len(neg_texts)}")
+            texts  = pos_texts[:max_per_class] + neg_texts[:max_per_class]
+            labels = [1] * min(len(pos_texts), max_per_class) + [0] * min(len(neg_texts), max_per_class)
+            log.info(f"  [classifier_b] contrast anchor (multi_nli adversative/causal): pos={len(pos_texts)} neg={len(neg_texts)}")
+            return texts, labels
+
+        elif concept == "conditionality":
+            # nyu-mll/multi_nli: filter hypothesis for conditional markers
+            # positives: hypotheses containing if/when/unless/provided/assuming etc.
+            # negatives: entailment-labelled hypotheses with no conditional markers
+            import re as _re  # noqa: PLC0415
+            _COND = _re.compile(
+                r'\b(if|when|unless|provided|assuming|whenever|given that|'
+                r'in case|as long as|only if|on condition)\b',
+                _re.I)
+            ds = load_dataset(cfg["hf_id"], cfg.get("config"),
+                              split=cfg["split"], streaming=True)
+            pos_texts, neg_texts = [], []
+            for row in ds:
+                hyp = str(row.get("hypothesis", "")).strip()
+                if not hyp:
+                    continue
+                if _COND.search(hyp):
+                    pos_texts.append(hyp)
+                elif row.get("label") == 0 and not _COND.search(hyp):
+                    # entailment pairs without conditional markers = clear non-conditional
+                    neg_texts.append(hyp)
+                if len(pos_texts) >= max_per_class and len(neg_texts) >= max_per_class:
+                    break
+            if len(pos_texts) < 50 or len(neg_texts) < 50:
+                raise RuntimeError(f"conditionality anchor too small: pos={len(pos_texts)} neg={len(neg_texts)}")
+            texts  = pos_texts[:max_per_class] + neg_texts[:max_per_class]
+            labels = [1] * min(len(pos_texts), max_per_class) + [0] * min(len(neg_texts), max_per_class)
+            log.info(f"  [classifier_b] conditionality anchor (multi_nli conditional/entailment): pos={len(pos_texts)} neg={len(neg_texts)}")
             return texts, labels
 
         elif concept == "code_docs":
