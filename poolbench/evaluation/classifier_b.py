@@ -125,12 +125,13 @@ ANCHOR_CONFIGS: dict[str, dict] = {
         "pos_values": ["contingency", "CONTINGENCY"],
     },
     "academic_tone": {
-        "hf_id":     "informal_formality",
-        "config":    "yahoo_answers",
+        "hf_id":     "osyvokon/pavlick-formality-scores",
+        "config":    None,
         "split":     "train",
-        "text_col":  "input",
-        "label_col": "label",
-        "pos_values": ["formal", 1],
+        "text_col":  "sentence",
+        "label_col": "avg_score",
+        "pos_values": [],
+        "_threshold": 0.5,   # Pavlick score > 0.5 = formal (positive class)
     },
     "frustration": {
         "hf_id":     "facebook/empathetic_dialogues",
@@ -201,7 +202,7 @@ def _load_anchor_rows(concept: str, max_per_class: int) -> tuple[list[str], list
     try:
         from datasets import load_dataset  # noqa: PLC0415
         ds = load_dataset(cfg["hf_id"], cfg.get("config"),
-                          split=cfg["split"], trust_remote_code=True)
+                          split=cfg["split"])
     except Exception as exc:
         raise RuntimeError(f"Failed to load anchor dataset for '{concept}': {exc}") from exc
 
@@ -269,7 +270,7 @@ def _custom_load(concept: str, cfg: dict,
             # story_cloze: all 4-sentence story sequences = positive (narrative)
             # negatives: take individual factual Wikipedia sentences from text_datasets
             ds = load_dataset(cfg["hf_id"], cfg.get("config"),
-                              split=cfg["split"], trust_remote_code=True)
+                              split=cfg["split"])
             pos_texts = []
             for row in ds:
                 # Concatenate the 4 input sentences as the passage
@@ -283,7 +284,7 @@ def _custom_load(concept: str, cfg: dict,
             neg_texts = []
             try:
                 wiki_ds = load_dataset("wikipedia", "20220301.simple",
-                                       split="train", streaming=True, trust_remote_code=True)
+                                       split="train", streaming=True)
                 for row in wiki_ds:
                     sents = str(row.get("text", "")).split(".")
                     for s in sents:
@@ -307,7 +308,7 @@ def _custom_load(concept: str, cfg: dict,
             # Apply custom filter: ≥ 4 numeric tokens for positive, 0 for negative
             import re  # noqa: PLC0415
             ds = load_dataset(cfg["hf_id"], cfg.get("config"),
-                              split=cfg["split"], trust_remote_code=True)
+                              split=cfg["split"])
             pos_texts, neg_texts = [], []
             for row in ds:
                 text = str(row.get(cfg["text_col"], "")).strip()
@@ -327,7 +328,7 @@ def _custom_load(concept: str, cfg: dict,
         elif concept == "code_docs":
             # humanevalpack: docstring = positive, declaration = negative
             ds = load_dataset(cfg["hf_id"], cfg.get("config"),
-                              split=cfg["split"], trust_remote_code=True)
+                              split=cfg["split"])
             pos_texts, neg_texts = [], []
             for row in ds:
                 doc  = str(row.get("docstring", "")).strip()
@@ -509,9 +510,13 @@ def train_all_classifiers_b(
     results = {}
     for concept in CONCEPT_NAMES:
         log.info(f"\n--- Classifier B: {concept} ---")
-        path = train_classifier_b(concept, classifiers_dir, device,
-                                  max_samples, force_retrain)
-        results[concept] = path
+        try:
+            path = train_classifier_b(concept, classifiers_dir, device,
+                                      max_samples, force_retrain)
+            results[concept] = path
+        except Exception as exc:
+            log.warning(f"  [SKIP] Classifier B for '{concept}' unavailable: {exc}")
+            results[concept] = None
     return results
 
 
