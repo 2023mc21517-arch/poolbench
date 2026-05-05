@@ -26,6 +26,7 @@ check_linearity_assumption(pos_pooled, neg_pooled, concept_name)
 from __future__ import annotations
 import json
 import os
+import concurrent.futures
 import numpy as np
 from pathlib import Path
 from typing import Any
@@ -245,19 +246,34 @@ def compute_train_test_auroc_for_strategy(
 
     auroc = _auroc_from_scores(oof_labels, oof_scores)
 
-    # Bootstrap on individual OOF (score, label) pairs — not fold means (§38)
+    # Bootstrap on individual OOF (score, label) pairs — vectorized (§38)
     rng = np.random.default_rng(RANDOM_SEED)
     n   = len(oof_labels)
     idx = rng.integers(0, n, size=(n_bootstrap, n))
-    boot = []
-    for row in idx:
-        if len(np.unique(oof_labels[row])) < 2:
-            continue
-        boot.append(_auroc_from_scores(oof_labels[row], oof_scores[row]))
+    # Vectorized: sort scores per resample and compute AUC via trapezoid rule
+    # Falls back gracefully if a resample is single-class
+    boot_scores = oof_scores[idx]   # (n_bootstrap, n)
+    boot_labels = oof_labels[idx]   # (n_bootstrap, n)
+    # Use numpy-only AUC: rank scores within each resample
+    order = np.argsort(-boot_scores, axis=1)
+    sorted_labels = np.take_along_axis(boot_labels, order, axis=1).astype(np.float32)
+    cum_pos  = np.cumsum(sorted_labels, axis=1)           # (n_bootstrap, n)
+    total_pos  = sorted_labels.sum(axis=1, keepdims=True)  # (n_bootstrap, 1)
+    total_neg  = n - total_pos
+    safe_mask  = (total_pos.ravel() > 0) & (total_neg.ravel() > 0)
+    tpr = cum_pos / np.where(total_pos > 0, total_pos, 1)
+    neg_mask = (sorted_labels == 0).astype(np.float32)
+    cum_neg  = np.cumsum(neg_mask, axis=1)
+    fpr = cum_neg / np.where(total_neg > 0, total_neg, 1)
+    # trapezoid AUC per row
+    dfpr = np.diff(fpr, axis=1, prepend=0)
+    boot_aucs = (tpr * dfpr).sum(axis=1)  # (n_bootstrap,)
+    boot_aucs = boot_aucs[safe_mask]
     ci_low, ci_high = (
-        (float(np.percentile(boot, 2.5)), float(np.percentile(boot, 97.5)))
-        if boot else (auroc, auroc)
+        (float(np.percentile(boot_aucs, 2.5)), float(np.percentile(boot_aucs, 97.5)))
+        if len(boot_aucs) > 0 else (auroc, auroc)
     )
+    boot = boot_aucs.tolist()
 
     return {
         "auroc":            auroc,
@@ -281,28 +297,41 @@ def compute_all_train_test_auroc(
     construction_method: str = DEFAULT_CONSTRUCTION,
     sae_model=None,
 ) -> dict:
-    """Compute D1 using train-pooled vectors for direction construction and test vectors for AUROC."""
+    """Compute D1 using train-pooled vectors for direction construction and test vectors for AUROC.
+
+    Parallelised across (concept, strategy) pairs using ThreadPoolExecutor.
+    numpy releases the GIL so threads give near-linear speedup up to cpu_count.
+    """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    results: dict[str, Any] = {}
-    keys = sorted(set(train_pooled_results) & set(test_pooled_results))
+    keys  = sorted(set(train_pooled_results) & set(test_pooled_results))
     total = len(keys)
-    for i, key in enumerate(keys, 1):
+    n_workers = min(os.cpu_count() or 1, total, 32)  # cap at 32 to avoid memory pressure
+
+    def _compute_one(key: str):
         tr = train_pooled_results[key]
         te = test_pooled_results[key]
-        if len(tr["pos_pooled"]) == 0 or len(tr["neg_pooled"]) == 0 or len(te["pos_pooled"]) == 0 or len(te["neg_pooled"]) == 0:
+        if (len(tr["pos_pooled"]) == 0 or len(tr["neg_pooled"]) == 0
+                or len(te["pos_pooled"]) == 0 or len(te["neg_pooled"]) == 0):
             raise RuntimeError(f"[probe] {key}: empty train/test activations")
-        res = compute_train_test_auroc_for_strategy(
+        return key, compute_train_test_auroc_for_strategy(
             tr["pos_pooled"], tr["neg_pooled"], te["pos_pooled"], te["neg_pooled"],
             construction_method=construction_method,
             sae_model=sae_model,
         )
-        results[key] = res
-        log.info(f"  [probe] {i}/{total}  {key}  "
-                 f"AUROC={res['auroc']:.3f}  CI=[{res['ci_low']:.3f},{res['ci_high']:.3f}]  "
-                 f"std={res['std']:.4f}  n_train_pos={res['n_train_pos']}  n_train_neg={res['n_train_neg']}  "
-                 f"n_test_pos={res['n_pos']}  n_test_neg={res['n_neg']}")
+
+    results: dict[str, Any] = {}
+    log.info(f"  [probe] Running {total} AUROC computations with {n_workers} parallel workers")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as pool:
+        futs = {pool.submit(_compute_one, k): k for k in keys}
+        for i, fut in enumerate(concurrent.futures.as_completed(futs), 1):
+            key, res = fut.result()
+            results[key] = res
+            log.info(f"  [probe] {i}/{total}  {key}  "
+                     f"AUROC={res['auroc']:.3f}  CI=[{res['ci_low']:.3f},{res['ci_high']:.3f}]  "
+                     f"std={res['std']:.4f}  n_train_pos={res['n_train_pos']}  n_train_neg={res['n_train_neg']}  "
+                     f"n_test_pos={res['n_pos']}  n_test_neg={res['n_neg']}")
 
     out_path = out_dir / f"{model_name}_auroc_results.json"
     with open(out_path, "w") as f:
