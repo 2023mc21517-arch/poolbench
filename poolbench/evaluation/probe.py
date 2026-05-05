@@ -25,6 +25,7 @@ check_linearity_assumption(pos_pooled, neg_pooled, concept_name)
 
 from __future__ import annotations
 import json
+import os
 import numpy as np
 from pathlib import Path
 from typing import Any
