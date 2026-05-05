@@ -229,6 +229,105 @@ def _tokenise_batch(texts: list[str], tokenizer, max_length: int = 512,
 
 # ── Core extraction ───────────────────────────────────────────────────────────
 
+def _extract_batch_multilayer(
+    model,
+    tokenizer,
+    model_name: str,
+    texts: list[str],
+    layer_indices: list[int],
+    device: str,
+    activation_dtype: np.dtype = np.dtype(np.float32),
+) -> dict[int, list[dict]]:
+    """
+    Extract activations for one batch at multiple layers in a single forward pass.
+    Registers hooks on all requested layers simultaneously so the model is only
+    called once regardless of how many candidate layers are requested.
+    Returns {layer_idx: list_of_per_passage_dicts}.
+    """
+    import torch  # noqa: PLC0415
+    is_ed = _is_encoder_decoder(model_name)
+    is_eo = _is_encoder_only(model_name)
+    max_length = 512 if is_ed or is_eo else 600
+
+    enc, offset_mapping = _tokenise_batch(texts, tokenizer, max_length=max_length,
+                                          is_encoder_decoder=is_ed)
+    enc = {k: v.to(device) for k, v in enc.items()}
+
+    # Register one hook per target layer — all captured in a single forward pass
+    hooks: dict[int, _LayerCaptureHook] = {}
+    for layer_idx in layer_indices:
+        hook = _LayerCaptureHook()
+        hook.register(_get_layer_module(model, model_name, layer_idx))
+        hooks[layer_idx] = hook
+
+    try:
+        import torch as _t  # noqa: PLC0415
+        with _t.inference_mode():
+            if is_ed:
+                _ = model.encoder(**enc)
+            else:
+                _ = model(**enc, output_attentions=not _is_ssm(model_name))
+    except Exception as exc:
+        for h in hooks.values():
+            h.remove()
+        raise RuntimeError(f"forward pass error during extraction: {exc}") from exc
+
+    for h in hooks.values():
+        h.remove()
+
+    attention_mask = enc["attention_mask"].cpu().numpy()   # (batch, seq_len)
+    input_ids_cpu  = enc["input_ids"].cpu().numpy()        # (batch, seq_len)
+
+    results_per_layer: dict[int, list[dict]] = {}
+    for layer_idx, hook in hooks.items():
+        hidden_batch = hook.hidden   # (batch, seq_len, d_model)
+        attn_batch   = hook.attn     # (batch, n_heads, seq_len, seq_len) or None
+
+        if hidden_batch is None:
+            raise RuntimeError(
+                f"Layer hook captured no hidden states for {model_name} layer {layer_idx}"
+            )
+
+        layer_results: list[dict] = []
+        for i, text in enumerate(texts):
+            seq_len = int(attention_mask[i].sum())
+            h_full  = hidden_batch[i]
+
+            if is_eo or is_ed:
+                h       = h_full[:seq_len].astype(activation_dtype)
+                offsets = [(int(s), int(e)) for s, e in offset_mapping[i, :seq_len].numpy()]
+                token_ids_clean = input_ids_cpu[i, :seq_len].tolist()
+            else:
+                # Causal LM with left-padding: real tokens are at the end
+                padded_len = h_full.shape[0]
+                start_pos  = padded_len - seq_len
+                h          = h_full[start_pos:].astype(activation_dtype)
+                offsets    = [(int(s), int(e)) for s, e in
+                              offset_mapping[i, start_pos:padded_len].numpy()]
+                token_ids_clean = input_ids_cpu[i, start_pos:padded_len].tolist()
+
+            attn = None
+            if attn_batch is not None and not _is_ssm(model_name):
+                if is_eo or is_ed:
+                    attn_full = attn_batch[i, :, :seq_len, :seq_len]
+                else:
+                    attn_full = attn_batch[i, :, start_pos:, start_pos:]
+                # Compact to per-head mean inflow (n_heads, seq_len) — ~20 MB saving per passage
+                attn = attn_full.mean(axis=1).astype(np.float16)
+
+            layer_results.append({
+                "hidden":         h,
+                "offset_mapping": offsets,
+                "text":           text,
+                "token_ids":      token_ids_clean,
+                "attn_weights":   attn,
+            })
+
+        results_per_layer[layer_idx] = layer_results
+
+    return results_per_layer
+
+
 def _extract_batch(
     model,
     tokenizer,
@@ -238,88 +337,10 @@ def _extract_batch(
     device: str,
     activation_dtype: np.dtype = np.dtype(np.float32),
 ) -> list[dict]:
-    """
-    Extract activations for one batch at a specific layer.
-    Returns a list of per-passage dicts.
-    """
-    import torch  # noqa: PLC0415
-    is_ed = _is_encoder_decoder(model_name)
-    is_eo = _is_encoder_only(model_name)
-    max_length = 512 if is_ed or is_eo else 600   # slightly over 500 to be safe
-
-    enc, offset_mapping = _tokenise_batch(texts, tokenizer, max_length=max_length,
-                                          is_encoder_decoder=is_ed)
-    enc = {k: v.to(device) for k, v in enc.items()}
-
-    hook = _LayerCaptureHook()
-    layer = _get_layer_module(model, model_name, layer_idx)
-    hook.register(layer)
-
-    try:
-        import torch as _t  # noqa: PLC0415
-        with _t.inference_mode():
-            if is_ed:
-                # Only run encoder; decoder output not needed
-                _ = model.encoder(**enc)
-            else:
-                _ = model(**enc, output_attentions=not _is_ssm(model_name))
-    except Exception as exc:
-        hook.remove()
-        raise RuntimeError(f"forward pass error during extraction (layer {layer_idx}): {exc}") from exc
-
-    hook.remove()
-
-    hidden_batch = hook.hidden   # (batch, seq_len, d_model) or None
-    attn_batch   = hook.attn     # (batch, n_heads, seq_len, seq_len) or None
-
-    if hidden_batch is None:
-        raise RuntimeError(f"Layer hook captured no hidden states for {model_name} layer {layer_idx}")
-
-    results = []
-    attention_mask = enc["attention_mask"].cpu().numpy()  # (batch, seq_len)
-
-    for i, text in enumerate(texts):
-        seq_len = int(attention_mask[i].sum())
-        h_full  = hidden_batch[i]    # (padded_seq_len, d_model)
-
-        if is_eo or is_ed:
-            # BERT / T5: no strong position direction; take from left
-            h = h_full[:seq_len].astype(activation_dtype)
-            offsets = [(int(s), int(e)) for s, e in offset_mapping[i, :seq_len].numpy()]
-        else:
-            # Causal LM with left-padding: last seq_len tokens are the real tokens
-            padded_len = h_full.shape[0]
-            start_pos  = padded_len - seq_len
-            h          = h_full[start_pos:].astype(activation_dtype)
-            offsets    = [(int(s), int(e)) for s, e in
-                          offset_mapping[i, start_pos:padded_len].numpy()]
-
-        attn = None
-        if attn_batch is not None and not _is_ssm(model_name):
-            if is_eo or is_ed:
-                attn_full = attn_batch[i, :, :seq_len, :seq_len]
-            else:
-                attn_full = attn_batch[i, :, start_pos:, start_pos:]
-            # Store only per-head mean inflow per token. S1 and S3_ITI_exact use
-            # token inflow, not the full query×key attention matrix. This reduces
-            # Llama activation files by roughly 20 MB per 400-token passage.
-            attn = attn_full.mean(axis=1).astype(np.float16)  # (n_heads, seq_len)
-
-        token_ids = enc["input_ids"][i].cpu().numpy()
-        if is_eo or is_ed:
-            token_ids_clean = token_ids[:seq_len].tolist()
-        else:
-            token_ids_clean = token_ids[start_pos:].tolist()
-
-        results.append({
-            "hidden":         h,              # (seq_len, d_model) activation_dtype on disk
-            "offset_mapping": offsets,        # list of (start, end)
-            "text":           text,
-            "token_ids":      token_ids_clean,
-            "attn_weights":   attn,           # (n_heads, seq_len) compact inflow or None
-        })
-
-    return results
+    """Single-layer wrapper around _extract_batch_multilayer (kept for compatibility)."""
+    return _extract_batch_multilayer(
+        model, tokenizer, model_name, texts, [layer_idx], device, activation_dtype
+    )[layer_idx]
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -367,49 +388,68 @@ def extract_activations_for_model(
              f"batch={batch_size}  activation_save_dtype={activation_dtype.name}  "
              f"GPU: {gpu_mem_str(device)}")
 
+    # Create all layer output dirs up front
+    layer_dirs: dict[int, Path] = {}
     for layer_idx in candidate_layers:
         layer_dir = out_dir / model_name / f"layer_{layer_idx}"
         layer_dir.mkdir(parents=True, exist_ok=True)
-        log.info(f"  [extract] Layer {layer_idx}  GPU: {gpu_mem_str(device)}")
+        layer_dirs[layer_idx] = layer_dir
 
-        for concept_dir in concept_dirs:
-            concept_name = concept_dir.name
-
+    # Reordered loop: concept → partition → split → batch.
+    # All candidate layers are captured in a single forward pass per batch,
+    # reducing GPU forward passes by a factor of len(candidate_layers).
+    for concept_dir in concept_dirs:
+        concept_name = concept_dir.name
+        for partition in ("train", "test"):
             for split in ("pos", "neg"):
-                for partition in ("train", "test"):
-                    jsonl_path = concept_dir / f"{partition}_{split}.jsonl"
-                    if not jsonl_path.exists():
-                        log.warning(f"  [extract] {concept_name}/{split}/{partition}: not found")
-                        continue
+                jsonl_path = concept_dir / f"{partition}_{split}.jsonl"
+                if not jsonl_path.exists():
+                    log.warning(f"  [extract] {concept_name}/{partition}/{split}: not found")
+                    continue
 
-                    out_path = layer_dir / f"{concept_name}_{partition}_{split}.npy"
-                    if skip_existing and out_path.exists():
-                        log.info(f"  [extract] {out_path.name} exists — skipping")
-                        continue
+                # Which layers still need this (concept, partition, split)?
+                layers_needed = [
+                    li for li in candidate_layers
+                    if not (skip_existing and
+                            (layer_dirs[li] / f"{concept_name}_{partition}_{split}.npy").exists())
+                ]
+                layers_skipped = [li for li in candidate_layers if li not in layers_needed]
+                for li in layers_skipped:
+                    log.info(f"  [extract] {concept_name}_{partition}_{split} L{li} exists — skipping")
+                if not layers_needed:
+                    continue
 
-                    records = load_jsonl(str(jsonl_path))
-                    texts   = [r["text"] for r in records]
-                    log.info(f"  [extract] {concept_name}/{partition}/{split} L{layer_idx}: "
-                             f"{len(texts)} passages  GPU: {gpu_mem_str(device)}")
+                records = load_jsonl(str(jsonl_path))
+                texts   = [r["text"] for r in records]
+                log.info(f"  [extract] {concept_name}/{partition}/{split} "
+                         f"layers={layers_needed}: {len(texts)} passages  "
+                         f"GPU: {gpu_mem_str(device)}")
 
-                    all_items: list[dict] = []
-                    for batch_start in tqdm(range(0, len(texts), batch_size),
-                                            desc=f"{concept_name}_{split} L{layer_idx}",
-                                            leave=False):
-                        batch_texts = texts[batch_start: batch_start + batch_size]
-                        items = _extract_batch(model, tokenizer, model_name,
-                                               batch_texts, layer_idx, device,
-                                               activation_dtype=activation_dtype)
+                # Accumulate per-layer results across all batches
+                all_items_per_layer: dict[int, list[dict]] = {li: [] for li in layers_needed}
+                for batch_start in tqdm(range(0, len(texts), batch_size),
+                                        desc=f"{concept_name}_{partition}_{split}",
+                                        leave=False):
+                    batch_texts = texts[batch_start: batch_start + batch_size]
+                    batch_results = _extract_batch_multilayer(
+                        model, tokenizer, model_name, batch_texts,
+                        layers_needed, device, activation_dtype=activation_dtype,
+                    )
+                    for li, items in batch_results.items():
                         if len(items) != len(batch_texts):
                             raise RuntimeError(
-                                f"Extraction returned {len(items)} items for batch of {len(batch_texts)} "
-                                f"({concept_name}/{partition}/{split} L{layer_idx})"
+                                f"Extraction returned {len(items)} items for batch of "
+                                f"{len(batch_texts)} ({concept_name}/{partition}/{split} L{li})"
                             )
-                        all_items.extend(items)
+                        all_items_per_layer[li].extend(items)
 
+                # Save each layer's output
+                for li in layers_needed:
+                    all_items = all_items_per_layer[li]
                     arr = np.empty(len(all_items), dtype=object)
                     for k, item in enumerate(all_items):
                         arr[k] = item
+                    out_path = layer_dirs[li] / f"{concept_name}_{partition}_{split}.npy"
                     np.save(out_path, arr)
                     log.info(f"  [extract] Saved {len(all_items)} passages → {out_path}  "
                              f"GPU: {gpu_mem_str(device)}")
