@@ -154,7 +154,7 @@ ANCHOR_CONFIGS: dict[str, dict] = {
         "hf_id":     "gfissore/arxiv-abstracts-2021",
         "config":    None,
         "split":     "train",
-        "text_col":  "Abstracts",
+        "text_col":  "abstract",
         "label_col": None,
         "pos_values": [],
         "_custom_loader": "numerical_precision",
@@ -302,35 +302,35 @@ def _custom_load(concept: str, cfg: dict,
 
         if concept == "narrative":
             # euclaise/writingprompts: story field = creative fiction (positive)
-            # gfissore/arxiv-abstracts-2021: scientific abstracts = factual prose (negative)
+            # cc_news: news articles = factual/non-narrative prose (negative)
             ds = load_dataset(cfg["hf_id"], cfg.get("config"),
                               split=cfg["split"], streaming=True)
             pos_texts = []
             for row in ds:
                 text = str(row.get("story", "")).strip()
-                # Use the first 400 chars to keep passages at a manageable length
                 text = text[:400].strip()
                 if len(text) >= 50:
                     pos_texts.append(text)
                 if len(pos_texts) >= max_per_class:
                     break
+            if len(pos_texts) < 50:
+                raise RuntimeError(f"narrative: writingprompts too small: pos={len(pos_texts)}")
             neg_texts = []
             try:
-                arxiv_ds = load_dataset("gfissore/arxiv-abstracts-2021",
-                                        split="train", streaming=True)
-                for row in arxiv_ds:
-                    text = str(row.get("Abstracts", "")).strip()
+                news_ds = load_dataset("cc_news", split="train", streaming=True)
+                for row in news_ds:
+                    text = str(row.get("text", "")).strip()[:400]
                     if len(text) >= 50:
                         neg_texts.append(text)
                     if len(neg_texts) >= max_per_class:
                         break
             except Exception as exc:
-                raise RuntimeError("narrative: could not load arxiv negatives") from exc
-            if len(pos_texts) < 50 or len(neg_texts) < 50:
-                raise RuntimeError(f"narrative anchor too small: pos={len(pos_texts)} neg={len(neg_texts)}")
+                raise RuntimeError(f"narrative: could not load cc_news negatives: {exc}") from exc
+            if len(neg_texts) < 50:
+                raise RuntimeError(f"narrative: cc_news negatives too small: neg={len(neg_texts)}")
             texts  = pos_texts[:max_per_class] + neg_texts[:max_per_class]
             labels = [1] * min(len(pos_texts), max_per_class) + [0] * min(len(neg_texts), max_per_class)
-            log.info(f"  [classifier_b] narrative anchor (writingprompts/arxiv): pos={len(pos_texts)} neg={len(neg_texts)}")
+            log.info(f"  [classifier_b] narrative anchor (writingprompts/cc_news): pos={len(pos_texts)} neg={len(neg_texts)}")
             return texts, labels
 
         elif concept == "numerical_precision":
@@ -342,7 +342,7 @@ def _custom_load(concept: str, cfg: dict,
                               split=cfg["split"], streaming=True)
             pos_texts, neg_texts = [], []
             for row in ds:
-                text = str(row.get("Abstracts", "")).strip()
+                text = str(row.get("abstract", "")).strip()
                 if not text:
                     continue
                 num_count = len(re.findall(r'\b\d+\.?\d*\b', text))
@@ -759,9 +759,10 @@ def train_all_classifiers_b(
     max_samples: int = MAX_SAMPLES_DEFAULT,
     force_retrain: bool = False,
 ) -> dict[str, Optional[Path]]:
-    """Train Classifier B for all non-LLM-scored concepts. Returns {concept: path}."""
+    """Train Classifier B for all concepts. Raises RuntimeError listing any failures."""
     from poolbench.concepts import CONCEPT_NAMES  # noqa: PLC0415
     results = {}
+    failures = {}
     for concept in CONCEPT_NAMES:
         log.info(f"\n--- Classifier B: {concept} ---")
         try:
@@ -769,8 +770,16 @@ def train_all_classifiers_b(
                                       max_samples, force_retrain)
             results[concept] = path
         except Exception as exc:
-            log.warning(f"  [SKIP] Classifier B for '{concept}' unavailable: {exc}")
+            log.error(f"  [FAIL] Classifier B for '{concept}' FAILED: {exc}")
+            failures[concept] = str(exc)
             results[concept] = None
+    if failures:
+        summary = "\n".join(f"  - {c}: {e}" for c, e in failures.items())
+        raise RuntimeError(
+            f"Step 5 aborted: {len(failures)}/{len(CONCEPT_NAMES)} Classifier B "
+            f"anchor(s) failed to train. Fix the datasets and re-run with "
+            f"--force_from_step 5:\n{summary}"
+        )
     return results
 
 
