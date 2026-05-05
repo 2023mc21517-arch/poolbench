@@ -1113,7 +1113,10 @@ def run_model(model_name: str, args: argparse.Namespace) -> dict:
                 from poolbench.extract_activations import load_model as _load_model  # noqa: PLC0415
                 cfg = MODEL_CONFIGS[model_name]
                 log.info(f"  [shared model] Loading {model_name} for Steps 6/6b/7  GPU: {gpu_mem_str(args.device)}")
-                _shared_model, _shared_tok = _load_model(model_name, cfg["hf_id"], args.device)
+                _shared_model, _shared_tok = _load_model(
+                    model_name, cfg["hf_id"], args.device,
+                    attn_implementation="sdpa",   # no attention weights needed for generation
+                )
                 log.info(f"  [shared model] Loaded  GPU: {gpu_mem_str(args.device)}")
             else:
                 log.info(f"  [shared model] Steps 6/6b/7 fully checkpointed — skipping model load")

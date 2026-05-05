@@ -135,17 +135,25 @@ def _compute_steering_vector(
     unigram_probs: dict | None = None,
     concept_probe=None,
     tokenizer=None,
+    pos_acts: np.ndarray | None = None,
+    neg_acts: np.ndarray | None = None,
 ) -> Optional[np.ndarray]:
     """
     Compute the DiffMean steering vector for a (concept, strategy) pair.
 
     Returns unit-normalised float32 ndarray of shape (d_model,) or None on error.
+
+    pos_acts / neg_acts: pre-loaded activation arrays.  When omitted, loaded from
+    disk (legacy path, retained for standalone callers).  Pass them in from the
+    per-concept loop to avoid 19× redundant disk reads of the same files.
     """
     from poolbench.extract_activations import load_activations  # noqa: PLC0415
     from poolbench.pooling_strategies import compute_pooled_vectors  # noqa: PLC0415
 
-    pos_acts = load_activations(act_dir, model_name, layer_idx, concept_name, "pos", partition="train")
-    neg_acts = load_activations(act_dir, model_name, layer_idx, concept_name, "neg", partition="train")
+    if pos_acts is None:
+        pos_acts = load_activations(act_dir, model_name, layer_idx, concept_name, "pos", partition="train")
+    if neg_acts is None:
+        neg_acts = load_activations(act_dir, model_name, layer_idx, concept_name, "neg", partition="train")
 
     if pos_acts is None or neg_acts is None:
         raise RuntimeError(f"[scp] missing train activations for {concept_name} L{layer_idx}")
@@ -258,21 +266,29 @@ def _compute_perplexity(model, tokenizer, texts: list[str], device: str) -> floa
     """
     Compute mean token-normalised log-perplexity of texts under the model.
     Uses unsteered model (no hook attached).
+    All texts are batched into a single forward pass for throughput.
     """
     import torch  # noqa: PLC0415
 
-    total_nll = 0.0
-    total_tok = 0
-    for text in texts:
-        enc = tokenizer(text, return_tensors="pt",
-                        truncation=True, max_length=256).to(device)
-        with torch.no_grad():
-            out = model(**enc, labels=enc["input_ids"])
-        n = enc["input_ids"].shape[1]
-        total_nll += out.loss.item() * n
-        total_tok += n
+    if not texts:
+        return float("inf")
 
-    return math.exp(total_nll / total_tok) if total_tok > 0 else float("inf")
+    # Right-pad so real tokens come first; padding at the end is masked out of loss.
+    orig_padding_side = tokenizer.padding_side
+    tokenizer.padding_side = "right"
+    try:
+        enc = tokenizer(
+            texts, return_tensors="pt", padding=True,
+            truncation=True, max_length=256,
+        ).to(device)
+        labels = enc["input_ids"].clone()
+        labels[enc["attention_mask"] == 0] = -100   # exclude padding from loss
+        with torch.no_grad():
+            out = model(**enc, labels=labels)
+        # out.loss = mean NLL per real token across the batch → exp gives perplexity
+        return math.exp(out.loss.item())
+    finally:
+        tokenizer.padding_side = orig_padding_side
 
 
 def _mean_token_length(tokenizer, texts: list[str]) -> float:
@@ -320,6 +336,13 @@ def _compute_concept_scp(
     _dummy_sv = np.zeros(1, dtype=np.float32)   # shape doesn't matter at α=0
     # Actually use a real steering vector from the first available strategy
     # so the hook is registered but has zero effect (alpha=0.0 means no addition).
+    # Load activations once for this concept — shared across all 19 strategies.
+    from poolbench.extract_activations import load_activations as _load_acts  # noqa: PLC0415
+    _pos_acts = _load_acts(act_dir, model_name, layer_idx, concept_name, "pos", partition="train")
+    _neg_acts = _load_acts(act_dir, model_name, layer_idx, concept_name, "neg", partition="train")
+    if _pos_acts is None or _neg_acts is None:
+        raise RuntimeError(f"[scp] missing train activations for concept={concept_name}")
+
     _first_sv: np.ndarray | None = None
     for _sid in strategy_ids:
         _sv = _compute_steering_vector(
@@ -327,6 +350,8 @@ def _compute_concept_scp(
             unigram_probs=unigram_probs,
             concept_probe=concept_probes.get(concept_name) if concept_probes else None,
             tokenizer=tokenizer,
+            pos_acts=_pos_acts,
+            neg_acts=_neg_acts,
         )
         if _sv is not None:
             _first_sv = _sv
@@ -351,6 +376,8 @@ def _compute_concept_scp(
             unigram_probs=unigram_probs,
             concept_probe=concept_probes.get(concept_name) if concept_probes else None,
             tokenizer=tokenizer,
+            pos_acts=_pos_acts,
+            neg_acts=_neg_acts,
         )
         if sv is None:
             raise RuntimeError(f"[scp] no steering vector for {concept_name}/{strat_id}")

@@ -84,7 +84,12 @@ def _activation_save_dtype(name: str | None = None) -> np.dtype:
 
 # ── Model loading ─────────────────────────────────────────────────────────────
 
-def load_model(model_name: str, hf_id: str, device: str = "cuda"):
+def load_model(
+    model_name: str,
+    hf_id: str,
+    device: str = "cuda",
+    attn_implementation: str | None = None,
+):
     """
     Load model + tokenizer for the given model_name.
     Returns (model, tokenizer).
@@ -94,6 +99,14 @@ def load_model(model_name: str, hf_id: str, device: str = "cuda"):
         must be full-precision for reliable AUROC measurements).
       - For 8B models: at least 16 GB VRAM required. For Gemma-2 9B: 20 GB.
       - Mamba2: loaded via MambaForCausalLM from transformers (>=4.40.0 required).
+
+    attn_implementation:
+      - None / omitted → "eager" for transformer causal LMs (required by activation
+        extraction because output_attentions=True is incompatible with flash/SDPA).
+      - "sdpa"          → PyTorch scaled-dot-product attention (torch>=2.0), uses
+        flash attention automatically on Ampere/Hopper GPUs.  Use this when loading
+        purely for generation (D2/D3 steps) to get throughput gains on H100.
+      - "flash_attention_2" → requires the flash-attn package to be installed.
     """
     import torch  # noqa: PLC0415
     from transformers import AutoTokenizer, AutoModelForCausalLM  # noqa: PLC0415
@@ -126,8 +139,10 @@ def load_model(model_name: str, hf_id: str, device: str = "cuda"):
         if not _is_ssm(model_name):
             # SDPA/Flash attention backends do not return attention maps with
             # output_attentions=True. S1 and S3 need token attention inflow, so
-            # force eager attention for Transformer causal LMs.
-            model_kwargs["attn_implementation"] = "eager"
+            # default to eager attention for Transformer causal LMs.
+            # Pass attn_implementation="sdpa" or "flash_attention_2" when the
+            # caller only needs generation throughput (no attention weights).
+            model_kwargs["attn_implementation"] = attn_implementation if attn_implementation is not None else "eager"
         model = AutoModelForCausalLM.from_pretrained(hf_id, **model_kwargs)
 
     model.eval()
