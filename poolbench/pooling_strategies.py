@@ -490,10 +490,18 @@ def build_unigram_probs_from_activations(act_dir, concepts: dict,
 
 
 def build_iti_concept_probes(act_dir, concepts: dict,
-                             partition: str = "train") -> dict:
-    """Build lightweight supervised ITI head-score probes from train activations."""
-    from sklearn.linear_model import LogisticRegression
-    from sklearn.model_selection import cross_val_score
+                             partition: str = "train",
+                             device: str = "cpu") -> dict:
+    """Build lightweight supervised ITI head-score probes from train activations.
+
+    All heads for a concept are trained simultaneously in one batched GPU pass
+    using a PyTorch logistic regression (LBFGS).  This replaces 1,632 sequential
+    sklearn fits with 3 batched GPU forward/backward passes per concept.
+    """
+    import torch
+    import torch.nn.functional as F
+    from sklearn.model_selection import StratifiedKFold
+    from sklearn.metrics import roc_auc_score
 
     act_dir = Path(act_dir)
     probes = {}
@@ -511,9 +519,11 @@ def build_iti_concept_probes(act_dir, concepts: dict,
         if sample_inflow is None:
             continue
         n_heads = sample_inflow.shape[0]
-        head_scores = np.zeros(n_heads, dtype=np.float32)
-        y = np.array([1] * len(pos_acts) + [0] * len(neg_acts), dtype=np.int32)
+        y = np.array([1] * len(pos_acts) + [0] * len(neg_acts), dtype=np.float32)
         all_acts = list(pos_acts) + list(neg_acts)
+
+        # Build all head feature matrices: list of (N, D) arrays, one per head
+        head_feats: list[np.ndarray] = []
         for head_idx in range(n_heads):
             feats = []
             for item in all_acts:
@@ -531,16 +541,49 @@ def build_iti_concept_probes(act_dir, concepts: dict,
                 feats.append((inflow[:, None] * h).sum(axis=0))
             X = np.stack(feats).astype(np.float32)
             X /= np.linalg.norm(X, axis=1, keepdims=True) + 1e-9
-            try:
-                clf = LogisticRegression(C=1.0, max_iter=300, solver="lbfgs", random_state=42)
-                scores = cross_val_score(clf, X, y, cv=3, scoring="roc_auc")
-                score = float(np.nanmean(scores))
-                if not np.isfinite(score):
-                    raise RuntimeError("non-finite cross-validation score")
-                head_scores[head_idx] = score
-            except Exception as exc:
-                raise RuntimeError(f"ITI head probe failed for {concept_name} head {head_idx}: {exc}") from exc
+            head_feats.append(X)
+
+        # Stack into (H, N, D) for batched GPU training
+        X_all = np.stack(head_feats, axis=0)  # (H, N, D)
+        H, N, D = X_all.shape
+
+        kf = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
+        fold_aurocs = np.zeros((H, 3), dtype=np.float32)
+
+        for fold_i, (tr_idx, te_idx) in enumerate(kf.split(X_all[0], y)):
+            Xtr = torch.from_numpy(X_all[:, tr_idx, :]).to(device)   # (H, N_tr, D)
+            ytr = torch.from_numpy(y[tr_idx]).to(device)              # (N_tr,)
+            Xte = torch.from_numpy(X_all[:, te_idx, :]).to(device)   # (H, N_te, D)
+            yte = y[te_idx]                                            # numpy for auroc
+
+            # Batched logistic regression: w (H, D), b (H,)
+            w = torch.zeros(H, D, device=device, requires_grad=True)
+            b = torch.zeros(H, device=device, requires_grad=True)
+            opt = torch.optim.Adam([w, b], lr=0.05)
+
+            for _ in range(300):
+                opt.zero_grad()
+                # logits: (H, N_tr)
+                logits = torch.bmm(Xtr, w.unsqueeze(2)).squeeze(2) + b.unsqueeze(1)
+                loss = F.binary_cross_entropy_with_logits(
+                    logits,
+                    ytr.unsqueeze(0).expand(H, -1),
+                )
+                loss.backward()
+                opt.step()
+
+            with torch.no_grad():
+                scores = (torch.bmm(Xte, w.unsqueeze(2)).squeeze(2) + b.unsqueeze(1)).cpu().numpy()  # (H, N_te)
+
+            for h_i in range(H):
+                if len(np.unique(yte)) >= 2:
+                    fold_aurocs[h_i, fold_i] = roc_auc_score(yte, scores[h_i])
+                else:
+                    fold_aurocs[h_i, fold_i] = 0.5
+
+        head_scores = fold_aurocs.mean(axis=1).astype(np.float32)
         probes[concept_name] = SimpleNamespace(head_scores=head_scores)
+    return probes
     return probes
 
 def compute_all_pooling_strategies(act_dir, concepts: dict,

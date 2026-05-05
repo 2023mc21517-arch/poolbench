@@ -242,7 +242,8 @@ def step_extract(model_name: str, device: str, skip_existing: bool = True,
 
 def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONSTRUCTION,
                         concept_filter: str | None = None,
-                        skip_existing: bool = True) -> dict:
+                        skip_existing: bool = True,
+                        device: str = "cpu") -> dict:
     """
     For each candidate layer, apply all 19 ranked strategies + compute AUROC.
     Select best layer per strategy (modal layer selection across all concepts).
@@ -297,7 +298,7 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
             log.info(f"  [checkpoint] Step 2 layer {layer_idx} missing {len(missing)} AUROC cells — recomputing layer")
 
         unigram_probs = build_unigram_probs_from_activations(layer_act_dir, concepts_to_run, partition="train")
-        concept_probes = build_iti_concept_probes(layer_act_dir, concepts_to_run, partition="train")
+        concept_probes = build_iti_concept_probes(layer_act_dir, concepts_to_run, partition="train", device=device)
         log.info(f"  [pool] S2 unigram vocab={len(unigram_probs)}  S3 ITI probes={len(concept_probes)}")
 
         # Build pooled_results: {concept_strategy: {pos_pooled, neg_pooled}}
@@ -992,6 +993,7 @@ def run_model(model_name: str, args: argparse.Namespace) -> dict:
         construction_method  = getattr(args, "construction_method", DEFAULT_CONSTRUCTION),
         concept_filter       = concept_filter,
         skip_existing        = not force_step(2),
+        device               = args.device,
     )
     best_layer = auroc_summary["best_layer"]
     log.info(f"  Best layer selected: {best_layer}")
