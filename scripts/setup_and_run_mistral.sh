@@ -108,7 +108,18 @@ PY
 # ── 5. Verify concepts load cleanly ──────────────────────────
 echo "[5/7] Verifying corpus..."
 python - <<'PY'
+from pathlib import Path
 from poolbench.data.concepts import CONCEPT_NAMES
+corpus_root = Path("data/corpora")
+present = [p for p in corpus_root.glob("*/train_pos.jsonl")]
+if len(present) < len(CONCEPT_NAMES):
+    raise SystemExit(
+        "Corpus missing or incomplete under data/corpora.\n"
+        "Download it with:\n"
+        "  huggingface-cli download poolbench-anon/poolbench --repo-type dataset --include 'data/corpora/**' --local-dir .\n"
+        "or rebuild it with:\n"
+        "  python scripts/dataset_builder.py --all"
+    )
 print(f"  Concepts loaded: {len(CONCEPT_NAMES)}")
 assert len(CONCEPT_NAMES) == 17, f"Expected 17 concepts, got {len(CONCEPT_NAMES)}"
 print("  OK")
