@@ -48,7 +48,7 @@ EVAL_PROMPTS: list[str] = [
     "The government official stated that the policy would",
     "An expert commented on the situation noting that",
     "The patient described their experience with the treatment",
-    "The team worked together to complete the project because",
+    "The team worked together to complete the project, and",
     "People living in urban areas often experience",
     "The teacher explained the concept to students by",
 ]
