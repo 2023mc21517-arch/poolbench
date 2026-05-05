@@ -206,6 +206,7 @@ def _generate_with_steering(
 ) -> list[str]:
     """
     Generate one completion per prompt with the steering vector injected.
+    All prompts are batched into a single model.generate call for GPU efficiency.
     Returns list of generated text strings (prompt NOT included).
     """
     import torch  # noqa: PLC0415
@@ -214,25 +215,39 @@ def _generate_with_steering(
     hook   = _SteeringHook(steering_vector, alpha, device)
     handle = hook.register(layer)
 
+    # Ensure the tokenizer has a pad token and pads on the left
+    # (decoder-only models generate from the right side of the prompt)
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+    orig_padding_side = tokenizer.padding_side
+    tokenizer.padding_side = "left"
+
     generated: list[str] = []
     try:
-        for prompt in prompts:
-            enc = tokenizer(prompt, return_tensors="pt",
-                            padding=False, truncation=True, max_length=128).to(device)
-            with torch.no_grad():
-                out_ids = model.generate(
-                    **enc,
-                    max_new_tokens=max_new_tokens,
-                    do_sample=False,       # greedy — deterministic for reproducibility
-                    temperature=1.0,
-                    pad_token_id=tokenizer.eos_token_id,
-                )
-            # Decode only the NEW tokens
-            new_ids = out_ids[0, enc["input_ids"].shape[1]:]
+        enc = tokenizer(
+            prompts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=128,
+        ).to(device)
+        prompt_lengths = enc["input_ids"].shape[1]
+        with torch.no_grad():
+            out_ids = model.generate(
+                **enc,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,       # greedy — deterministic for reproducibility
+                temperature=1.0,
+                pad_token_id=tokenizer.eos_token_id,
+            )
+        # Decode only the NEW tokens for each item in the batch
+        for i in range(len(prompts)):
+            new_ids = out_ids[i, prompt_lengths:]
             text    = tokenizer.decode(new_ids, skip_special_tokens=True)
             generated.append(text)
     finally:
         handle.remove()
+        tokenizer.padding_side = orig_padding_side
 
     return generated
 
