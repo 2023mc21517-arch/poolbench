@@ -401,6 +401,9 @@ def _custom_load(concept: str, cfg: dict,
             log.info(f"  [classifier_b] causation anchor (task391): pos={len(pos_texts)} neg={len(neg_texts)}")
             return texts, labels
 
+    except Exception as exc:
+        raise RuntimeError(f"Custom loader error for '{concept}': {exc}") from exc
+
     raise RuntimeError(f"No custom loader branch implemented for '{concept}'")
 
 
