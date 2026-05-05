@@ -17,6 +17,7 @@ VENV_DIR="$HOME/venvs/poolbench"
 LOG_DIR="$REPO_DIR/results/logs"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 LOG_FILE="$LOG_DIR/mistral_7b_full_${TIMESTAMP}.log"
+USE_CURRENT_ENV="${POOLBENCH_USE_CURRENT_ENV:-0}"
 
 echo "============================================================"
 echo " PoolBench setup + mistral_7b production run"
@@ -45,9 +46,23 @@ fi
 echo "  Commit: $(git rev-parse --short HEAD)"
 
 # ── 2. Python venv ──────────────────────────────────────────
-echo "[2/7] Setting up Python venv at $VENV_DIR..."
-bash "$REPO_DIR/scripts/setup_cluster_venv.sh" "$VENV_DIR"
-source "$VENV_DIR/bin/activate"
+if [[ "$USE_CURRENT_ENV" == "1" ]]; then
+        echo "[2/7] Using current Python environment (POOLBENCH_USE_CURRENT_ENV=1)..."
+        python -m pip install --upgrade pip setuptools wheel
+        python -m pip install --no-cache-dir --force-reinstall \
+            --index-url https://download.pytorch.org/whl/cu121 \
+            "torch==2.5.1"
+        python -m pip install --no-cache-dir --force-reinstall \
+            "numpy==1.26.4" \
+            "scipy==1.12.0" \
+            "scikit-learn==1.4.2"
+        python -m pip install --no-cache-dir -e .
+        python -m pip install --no-cache-dir "accelerate>=0.26.0"
+else
+        echo "[2/7] Setting up Python venv at $VENV_DIR..."
+        bash "$REPO_DIR/scripts/setup_cluster_venv.sh" "$VENV_DIR"
+        source "$VENV_DIR/bin/activate"
+fi
 
 # spaCy model required for L-family pooling strategies
 python -m spacy download en_core_web_sm --quiet
