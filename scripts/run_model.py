@@ -345,8 +345,11 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
         )
         if concept_filter is not None:
             auroc_res = _merge_auroc_results(existing_layer, auroc_res, list(concepts_to_run))
-            with open(layer_out_path, "w") as f:
-                json.dump(auroc_res, f, indent=2)
+        # Always checkpoint the layer result so a crash can be resumed from the next layer
+        layer_auroc_dir.mkdir(parents=True, exist_ok=True)
+        with open(layer_out_path, "w") as f:
+            json.dump(auroc_res, f, indent=2)
+        log.info(f"  [checkpoint] Layer {layer_idx} saved → {layer_out_path}")
         per_layer_results[layer_idx] = auroc_res
 
     fallback_out = AUROC_DIR / model_name / "fallback_rates.json"
