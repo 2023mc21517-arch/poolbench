@@ -62,7 +62,9 @@ def _classifier_artifact_complete(save_dir: Path) -> bool:
 # pos_values: label values that correspond to the POSITIVE class
 ANCHOR_CONFIGS: dict[str, dict] = {
     "imdb_sentiment": {
-        "hf_id":     "stanfordnlp/imdb",
+        # Corpus uses yin001/imdb_dataset_positive_negative (IMDb) — use Rotten Tomatoes
+        # instead (same binary sentiment task, different source, no overlap).
+        "hf_id":     "rotten_tomatoes",
         "config":    None,
         "split":     "train",
         "text_col":  "text",
@@ -88,22 +90,30 @@ ANCHOR_CONFIGS: dict[str, dict] = {
         "_custom_loader": "contrast",
     },
     "narrative": {
-        "hf_id":     "euclaise/writingprompts",
+        # Corpus pos uses euclaise/writingprompts — switch Classifier B anchor
+        # to roneneldan/TinyStories (synthetic short fiction, different source) as
+        # positives, and cc_news (already corpus neg for this concept) as negatives.
+        # Using cc_news for negative here is fine: the Classifier B is trained on an
+        # independent external anchor, not on PoolBench corpus passages themselves.
+        "hf_id":     "roneneldan/TinyStories",
         "config":    None,
         "split":     "train",
-        "text_col":  "story",
+        "text_col":  "text",
         "label_col": None,
         "pos_values": [],
         "_custom_loader": "narrative",
     },
     "toxicity": {
-        "hf_id":     "google/civil_comments",
+        # Corpus uses google/civil_comments — switch Classifier B anchor to
+        # tdavidson/hate_speech_offensive (Twitter, different source/domain).
+        # label 0=hate speech (positive: toxic), label 2=neither (negative: non-toxic).
+        "hf_id":     "tdavidson/hate_speech_offensive",
         "config":    None,
         "split":     "train",
-        "text_col":  "text",
-        "label_col": "toxicity",
-        "pos_values": [],           # continuous: > 0.5 → positive
-        "_threshold": 0.5,
+        "text_col":  "tweet",
+        "label_col": "class",
+        "pos_values": [0, "hate speech"],
+        "_neg_values": [2, "neither"],
     },
     "causation": {
         "hf_id":     "Lots-of-LoRAs/task391_causal_relationship",
@@ -142,12 +152,15 @@ ANCHOR_CONFIGS: dict[str, dict] = {
         "_neg_values": [1, "joy"],
     },
     "negation_density": {
-        "hf_id":     "nyu-mll/multi_nli",
+        # Corpus uses facebook/multi_nli (= nyu-mll/multi_nli) — switch Classifier B
+        # anchor to stanfordnlp/snli (different dataset, same NLI task):
+        # contradiction label ≈ negation-dense hypothesis, entailment = non-negated.
+        "hf_id":     "stanfordnlp/snli",
         "config":    None,
         "split":     "train",
         "text_col":  "hypothesis",
         "label_col": "label",
-        "pos_values": [2, "contradiction"],   # contradiction ≈ negation-dense
+        "pos_values": [2, "contradiction"],
         "_neg_values": [0, "entailment"],
     },
     "numerical_precision": {
@@ -186,13 +199,16 @@ ANCHOR_CONFIGS: dict[str, dict] = {
         "_custom_loader": "bureaucratic",
     },
     "deference": {
-        "hf_id":     "Intel/polite-guard",
+        # Corpus uses Intel/polite-guard — switch Classifier B anchor to
+        # Yelp/yelp_review_full: 5-star reviews = deferential/positive tone (positive),
+        # 1-star reviews = rude/negative tone (negative). Different domain/source.
+        "hf_id":     "Yelp/yelp_review_full",
         "config":    None,
         "split":     "train",
         "text_col":  "text",
         "label_col": "label",
-        "pos_values": ["polite", "somewhat polite"],
-        "_neg_values": ["neutral", "impolite"],
+        "pos_values": [4, "5 stars"],    # label 4 = 5 stars
+        "_neg_values": [0, "1 star"],    # label 0 = 1 star
     },
     "legal_formality": {
         "hf_id":     "lex_glue",
@@ -301,20 +317,21 @@ def _custom_load(concept: str, cfg: dict,
         from datasets import load_dataset  # noqa: PLC0415
 
         if concept == "narrative":
-            # euclaise/writingprompts: story field = creative fiction (positive)
-            # cc_news: news articles = factual/non-narrative prose (negative)
+            # roneneldan/TinyStories: synthetic short fiction = positives
+            # cc_news: news articles = factual/non-narrative prose = negatives
+            # (euclaise/writingprompts is the corpus source — TinyStories is disjoint)
             ds = load_dataset(cfg["hf_id"], cfg.get("config"),
                               split=cfg["split"], streaming=True)
             pos_texts = []
             for row in ds:
-                text = str(row.get("story", "")).strip()
+                text = str(row.get("text", "")).strip()
                 text = text[:400].strip()
                 if len(text) >= 50:
                     pos_texts.append(text)
                 if len(pos_texts) >= max_per_class:
                     break
             if len(pos_texts) < 50:
-                raise RuntimeError(f"narrative: writingprompts too small: pos={len(pos_texts)}")
+                raise RuntimeError(f"narrative: TinyStories too small: pos={len(pos_texts)}")
             neg_texts = []
             try:
                 news_ds = load_dataset("cc_news", split="train", streaming=True)
@@ -330,7 +347,7 @@ def _custom_load(concept: str, cfg: dict,
                 raise RuntimeError(f"narrative: cc_news negatives too small: neg={len(neg_texts)}")
             texts  = pos_texts[:max_per_class] + neg_texts[:max_per_class]
             labels = [1] * min(len(pos_texts), max_per_class) + [0] * min(len(neg_texts), max_per_class)
-            log.info(f"  [classifier_b] narrative anchor (writingprompts/cc_news): pos={len(pos_texts)} neg={len(neg_texts)}")
+            log.info(f"  [classifier_b] narrative anchor (TinyStories/cc_news): pos={len(pos_texts)} neg={len(neg_texts)}")
             return texts, labels
 
         elif concept == "numerical_precision":
