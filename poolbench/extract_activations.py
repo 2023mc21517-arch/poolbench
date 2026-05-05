@@ -3,7 +3,7 @@ src/extract_activations.py
 GPU-side activation extraction for PoolBench.
 
 Supports:
-  - Causal LM (Llama 3.1 8B, Gemma-2 9B, Mistral 7B, Qwen 2.5 7B, Mamba2 2.7B)
+  - Causal LM (Llama 3.1 8B, Gemma-2 9B, Mistral 7B)
   - Encoder-Decoder (FLAN-T5 XL) — encoder hidden states only
   - Encoder-only (BERT base uncased)
 
@@ -12,10 +12,9 @@ Each call saves per-concept .npy files (object arrays of dicts) to:
   {out_dir}/{model_name}/{concept}_neg.npy
 
 Each element in the saved object array is a dict:
-    "hidden"          — (seq_len, d_model) float32 by default, or float16 when
-                                             explicitly requested for low-disk runs;
-                                             downstream pooling casts back to float32
-                                             for computation
+    "hidden"          — (seq_len, d_model) float16 by default (set
+                         POOLBENCH_ACTIVATION_SAVE_DTYPE=float32 to override);
+                         downstream pooling casts back to float32 for computation
   "offset_mapping"  — list of (char_start, char_end) int tuples
   "text"            — original passage string (for L1–L3 spaCy)
   "token_ids"       — list of int HF token IDs (for L4 / S3_SIF)
@@ -51,9 +50,11 @@ log = get_logger("poolbench.extract")
 
 # ── architecture detection ────────────────────────────────────────────────────
 
-_ENCODER_DECODER_MODELS = {"flan_t5_xl"}
-_ENCODER_ONLY_MODELS    = {"bert_base_uncased"}
-_SSM_MODELS             = {"mamba2_2b7"}
+# All benchmark models are causal decoder LMs—no encoder-only, encoder-decoder, or SSM architectures
+# in scope. These sets are kept empty; the helpers below always return False.
+_ENCODER_DECODER_MODELS: set[str] = set()
+_ENCODER_ONLY_MODELS: set[str]    = set()
+_SSM_MODELS: set[str]             = set()
 
 
 def _is_encoder_decoder(model_name: str) -> bool:
@@ -69,8 +70,8 @@ def _is_ssm(model_name: str) -> bool:
 
 
 def _activation_save_dtype(name: str | None = None) -> np.dtype:
-    """Resolve on-disk activation dtype. Defaults to float32 for research fidelity."""
-    dtype_name = (name or os.environ.get("POOLBENCH_ACTIVATION_SAVE_DTYPE", "float32")).lower()
+    """Resolve on-disk activation dtype. Defaults to float16 (50% disk savings; downstream pooling upcasts to float32 before computation)."""
+    dtype_name = (name or os.environ.get("POOLBENCH_ACTIVATION_SAVE_DTYPE", "float16")).lower()
     if dtype_name in {"float32", "fp32"}:
         return np.dtype(np.float32)
     if dtype_name in {"float16", "fp16"}:
@@ -241,7 +242,7 @@ def _extract_batch(
 
     try:
         import torch as _t  # noqa: PLC0415
-        with _t.no_grad():
+        with _t.inference_mode():
             if is_ed:
                 # Only run encoder; decoder output not needed
                 _ = model.encoder(**enc)

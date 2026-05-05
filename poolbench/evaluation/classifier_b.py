@@ -39,6 +39,9 @@ ZERO_SHOT_MODEL_ID = os.environ.get(
     "POOLBENCH_ZERO_SHOT_MODEL_ID",
     "claude-claude-sonnet-4-5-20251022",
 )
+# Max number of passages packed into a single Claude request (trade-off between
+# latency and context length).  Override with POOLBENCH_CLAUDE_BATCH_SIZE.
+_CLAUDE_BATCH_SIZE: int = int(os.environ.get("POOLBENCH_CLAUDE_BATCH_SIZE", "20"))
 
 # ── Concepts handled by zero-shot LLM (§52) ──────────────────────────────────
 LLM_SCORED_CONCEPTS: set[str] = {
@@ -412,8 +415,13 @@ def train_classifier_b(
 
     tr_ds = _TextDataset(tr_texts, tr_labels, tok)
     va_ds = _TextDataset(va_texts, va_labels, tok)
-    tr_dl = DataLoader(tr_ds, batch_size=32, shuffle=True, drop_last=False)
-    va_dl = DataLoader(va_ds, batch_size=64, shuffle=False)
+    _pin  = "cuda" in device
+    _nw   = min(4, os.cpu_count() or 1) if _pin else 0
+    _train_bs = 64 if _pin else 32   # A100 easily fits BERT-base at bs=64
+    tr_dl = DataLoader(tr_ds, batch_size=_train_bs, shuffle=True, drop_last=False,
+                       num_workers=_nw, pin_memory=_pin)
+    va_dl = DataLoader(va_ds, batch_size=128, shuffle=False,
+                       num_workers=_nw, pin_memory=_pin)
 
     # ── model ────────────────────────────────────────────────────────────────
     model = AutoModelForSequenceClassification.from_pretrained(
@@ -428,6 +436,8 @@ def train_classifier_b(
 
     best_val_acc   = 0.0
     best_state_cpu = None
+    _use_amp = "cuda" in device
+    scaler   = torch.cuda.amp.GradScaler(enabled=_use_amp)
 
     for epoch in range(3):
         model.train()
@@ -435,12 +445,15 @@ def train_classifier_b(
         for batch_enc, batch_labels in tr_dl:
             batch_enc    = {k: v.to(device) for k, v in batch_enc.items()}
             batch_labels = batch_labels.to(device)
-            outputs      = model(**batch_enc, labels=batch_labels)
-            loss         = outputs.loss
             optimizer.zero_grad()
-            loss.backward()
+            with torch.cuda.amp.autocast(enabled=_use_amp):
+                outputs = model(**batch_enc, labels=batch_labels)
+                loss    = outputs.loss
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
             scheduler.step()
             total_loss += loss.item()
 
@@ -564,38 +577,60 @@ def score_texts(
         meta = CONCEPTS.get(concept, {})
         positive_def = meta.get("positive_def", concept.replace("_", " "))
         negative_def = meta.get("negative_def", f"not {concept.replace('_', ' ')}")
+
         scores: list[float] = []
-        for text in texts:
+        for batch_start in range(0, len(texts), _CLAUDE_BATCH_SIZE):
+            batch = texts[batch_start : batch_start + _CLAUDE_BATCH_SIZE]
+            # Build a single multi-passage prompt; ask for a JSON array of scores
+            passages_block = "\n\n".join(
+                f"[{i+1}] {t}" for i, t in enumerate(batch)
+            )
             prompt = (
-                "You are scoring whether a generated passage expresses a target concept.\n"
-                "Return ONLY valid JSON with one key, score, whose value is a number from 0.0 to 1.0.\n"
-                "0.0 means the target concept is absent. 1.0 means it is strongly present.\n\n"
+                "You are scoring whether generated passages express a target concept.\n"
+                "Return ONLY valid JSON: an array of numbers, one per passage, each 0.0–1.0.\n"
+                "0.0 = concept absent; 1.0 = concept strongly present.\n"
+                f"Array length MUST equal {len(batch)}. No extra keys or text.\n\n"
                 f"Target concept: {concept}\n"
                 f"Positive definition: {positive_def}\n"
                 f"Negative definition: {negative_def}\n\n"
-                f"Passage:\n{text}\n"
+                f"Passages:\n{passages_block}\n"
             )
             try:
                 msg = client.messages.create(
                     model=model_id,
-                    max_tokens=40,
+                    max_tokens=20 * len(batch),   # ~3–4 tokens per score
                     temperature=0,
                     messages=[{"role": "user", "content": prompt}],
                 )
             except Exception as exc:
-                raise RuntimeError(f"Claude zero-shot scoring failed for concept={concept}: {exc}") from exc
-            raw = "".join(block.text for block in msg.content if getattr(block, "type", None) == "text")
+                raise RuntimeError(
+                    f"Claude zero-shot batch scoring failed for concept={concept}: {exc}"
+                ) from exc
+            raw = "".join(
+                block.text for block in msg.content if getattr(block, "type", None) == "text"
+            )
+            # Parse JSON array
             try:
                 parsed = json.loads(raw)
-                score = float(parsed["score"])
+                if not isinstance(parsed, list):
+                    raise ValueError("response is not a JSON array")
+                batch_scores = [float(v) for v in parsed]
             except Exception:
-                match = re.search(r"\b(?:0(?:\.\d+)?|1(?:\.0+)?)\b", raw)
-                if not match:
-                    raise RuntimeError(f"Claude returned an unparsable score for concept={concept}: {raw!r}")
-                score = float(match.group(0))
-            if not 0.0 <= score <= 1.0:
-                raise RuntimeError(f"Claude score out of [0,1] for concept={concept}: {score}")
-            scores.append(score)
+                # Fall back: extract all 0.0–1.0 floats from the raw string
+                matches = re.findall(r"\b(?:0(?:\.\d+)?|1(?:\.0+)?)\b", raw)
+                batch_scores = [float(m) for m in matches]
+
+            if len(batch_scores) != len(batch):
+                raise RuntimeError(
+                    f"Claude returned {len(batch_scores)} scores for {len(batch)} passages "
+                    f"(concept={concept}): {raw!r}"
+                )
+            for s in batch_scores:
+                if not 0.0 <= s <= 1.0:
+                    raise RuntimeError(
+                        f"Claude score out of [0,1] for concept={concept}: {s}"
+                    )
+            scores.extend(batch_scores)
         return scores
     if classifier is None or tokenizer is None:
         raise RuntimeError("score_texts received no classifier/tokenizer; refusing constant-score fallback")

@@ -86,8 +86,7 @@ def main():
     parser.add_argument("--strategy_file", required=True)
     parser.add_argument("--strategy_fn",   required=True)
     parser.add_argument("--model",         default="llama3_8b",
-                        choices=["llama3_8b", "gemma2_9b", "mistral_7b",
-                                 "qwen25_7b", "flan_t5_xl", "mamba2_2b", "bert_base"])
+                        choices=["llama3_8b", "gemma2_9b", "mistral_7b"])
     parser.add_argument("--output",        default="community_results.json")
     parser.add_argument("--cache_dir",     default=".hf_cache")
     args = parser.parse_args()

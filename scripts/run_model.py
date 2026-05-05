@@ -28,8 +28,8 @@ python run_model.py --model llama3_8b --skip_extraction --device cuda:0
 # Skip D2/D3 (D1 only)
 python run_model.py --model llama3_8b --skip_scp --device cuda:0
 
-# Run linearity checks only
-python run_model.py --model llama3_8b --linearity_only --device cpu
+# Run linearity checks only (still benefits from GPU for MLP folds)
+python run_model.py --model llama3_8b --linearity_only --device cuda:0
 """
 
 from __future__ import annotations
@@ -78,44 +78,9 @@ MODEL_CONFIGS: dict[str, dict] = {
         "hf_id":            "mistralai/Mistral-7B-v0.1",
         "d_model":          4096,
         "n_layers":         32,
-        "candidate_layers": [16, 24, 31],
+        "candidate_layers": [8, 16, 24],  # aligns with jbloom SAE layers
         "architecture":     "causal_lm",
         "batch_size":       8,
-    },
-    "qwen25_7b": {
-        "hf_id":            "Qwen/Qwen2.5-7B",
-        "d_model":          3584,
-        "n_layers":         28,
-        "candidate_layers": [10, 18, 27],
-        "architecture":     "causal_lm",
-        "batch_size":       8,
-    },
-    "flan_t5_xl": {
-        "hf_id":            "google/flan-t5-xl",
-        "d_model":          2048,
-        "n_layers":         24,
-        "candidate_layers": [8, 16, 23],
-        "architecture":     "encoder_decoder",
-        "batch_size":       16,
-        # Attention pooling: FLAN-T5 encoder self-attn is available but cross-attn is not.
-        # S1/S4 strategies fall back to pool_mean for this model.
-    },
-    "mamba2_2b7": {
-        "hf_id":            "state-spaces/mamba2-2.8b",
-        "d_model":          2560,
-        "n_layers":         64,
-        "candidate_layers": [21, 42, 63],
-        "architecture":     "ssm",
-        "batch_size":       16,
-        # No self-attention → S1/S4 fallback to pool_mean.
-    },
-    "bert_base_uncased": {
-        "hf_id":            "bert-base-uncased",
-        "d_model":          768,
-        "n_layers":         12,
-        "candidate_layers": [6, 9, 11],
-        "architecture":     "encoder_only",
-        "batch_size":       32,
     },
 }
 
@@ -319,12 +284,12 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
         train_pooled_results: dict = {}
         test_pooled_results: dict = {}
         for concept_name in concepts_to_run:
-            train_pos = load_activations(ACT_DIR, model_name, layer_idx, concept_name, "pos", partition="train")
-            train_neg = load_activations(ACT_DIR, model_name, layer_idx, concept_name, "neg", partition="train")
-            test_pos = load_activations(ACT_DIR, model_name, layer_idx, concept_name, "pos", partition="test")
-            test_neg = load_activations(ACT_DIR, model_name, layer_idx, concept_name, "neg", partition="test")
-            if train_pos is None or train_neg is None or test_pos is None or test_neg is None:
-                raise RuntimeError(f"[pool] {concept_name} L{layer_idx}: train/test activations missing")
+            # Verify files exist without loading them (compute_all_pooling_strategies reloads from disk)
+            for _part in ("train", "test"):
+                for _split in ("pos", "neg"):
+                    _p = layer_act_dir / f"{concept_name}_{_part}_{_split}.npy"
+                    if not _p.exists():
+                        raise RuntimeError(f"[pool] {concept_name} L{layer_idx}: missing {_p.name}")
             # Apply all pooling strategies
             concept_dict = {concept_name: concepts_to_run[concept_name]}
             train_layer_pooled = compute_all_pooling_strategies(
@@ -468,14 +433,16 @@ def _select_modal_layer(per_layer_results: dict[int, dict],
 # ── Step 3: Linearity validation (D3) ────────────────────────────────────────
 
 def step_linearity(model_name: str, best_layer: int,
+                   device: str = "cpu",
                    construction_method: str = DEFAULT_CONSTRUCTION,
                    concept_filter: str | None = None,
                    skip_existing: bool = True) -> None:
     """
     Run the linearity assumption check for each concept at the best layer.
+    MLP runs on `device` (GPU accelerated when device=cuda:N).
     Saves results to results/linearity/{model_name}_linearity.json.
     """
-    log.info(f"\n=== Step 3: Linearity check — {model_name} L{best_layer} ===  GPU: {gpu_mem_str()}")
+    log.info(f"\n=== Step 3: Linearity check — {model_name} L{best_layer} ===  GPU: {gpu_mem_str(device)}")
     LINEARITY_DIR.mkdir(parents=True, exist_ok=True)
     concepts_to_run = CONCEPT_NAMES if concept_filter is None else [concept_filter]
     out_path = LINEARITY_DIR / f"{model_name}_linearity.json"
@@ -501,7 +468,7 @@ def step_linearity(model_name: str, best_layer: int,
         neg_pooled = np.stack([np.asarray(item["hidden"], dtype=np.float32).mean(0) for item in neg_acts])
 
         result = check_linearity_assumption(pos_pooled, neg_pooled, concept_name,
-                                             construction_method)
+                                             construction_method, device=device)
         linearity_results[concept_name] = result
         with open(out_path, "w") as f:
             json.dump(linearity_results, f, indent=2)
@@ -580,7 +547,7 @@ def step_icc(model_name: str, construction_method: str = DEFAULT_CONSTRUCTION,
 def step_nemenyi(all_model_auroc_results: dict[str, dict],
                  concept_filter: str | None = None) -> None:
     """
-    Run the Nemenyi test over all 7 models jointly.
+    Run the Nemenyi test over all 3 models jointly.
     Should be called after all models have completed steps 1–2.
 
     all_model_auroc_results: {model_name: {concept_strategy: {auroc: float}}}
@@ -741,7 +708,7 @@ def step_keyword_ablation(
 # ── Step 5: Classifier B training (run once per experiment) ──────────────────
 
 def step_train_classifiers(
-    device: str = "cpu",   # CPU is fine — BERT is small
+    device: str = "cuda:0",   # GPU strongly preferred — bs=64 on A100 is ~3× faster than CPU
     force_retrain: bool = False,
 ) -> None:
     """
@@ -777,11 +744,14 @@ def step_scp(
     device: str,
     concept_filter: str | None = None,
     skip_existing: bool = True,
+    model=None,
+    tokenizer=None,
 ) -> dict:
     """
     Compute D2 Steered Concept Prevalence for all (concept × strategy) pairs.
     Requires Classifier B to already be trained (Step 5).
     Saves to results/scp/{model_name}_scp.json.
+    If `model`/`tokenizer` are passed in, they are reused (no redundant load).
     """
     from poolbench.evaluation.scp_eval import compute_scp_for_model  # noqa: PLC0415
 
@@ -800,9 +770,10 @@ def step_scp(
             classifiers_dir = CLASSIFIERS_DIR,
             out_dir         = SCP_DIR,
             skip_existing   = skip_existing,
+            model           = model,
+            tokenizer       = tokenizer,
         )
 
-    free_gpu_memory(device)
     log.info(f"  Step 6 done. GPU: {gpu_mem_str(device)}")
     return scp_results
 
@@ -812,6 +783,8 @@ def step_prompted_baseline(
     device: str,
     concept_filter: str | None = None,
     skip_existing: bool = True,
+    model=None,
+    tokenizer=None,
 ) -> dict:
     """Compute the unranked prompted-baseline SCP row required by the methodology."""
     from poolbench.evaluation.scp_eval import (  # noqa: PLC0415
@@ -846,6 +819,9 @@ def step_prompted_baseline(
             classifiers_dir = CLASSIFIERS_DIR,
             out_dir         = SCP_DIR,
             concept_prompts = CURATED_CONCEPT_PROMPTS,
+            model           = model,
+            tokenizer       = tokenizer,
+            skip_existing   = skip_existing,
         )
 
 
@@ -857,11 +833,14 @@ def step_disentanglement(
     device: str,
     concept_filter: str | None = None,
     skip_existing: bool = True,
+    model=None,
+    tokenizer=None,
 ) -> dict:
     """
     Compute D3 disentanglement metrics.
     Requires D2 SCP results (Step 6) to be saved.
     Saves to results/disentanglement/{model_name}_d3.json.
+    If `model`/`tokenizer` are passed in, they are reused (no redundant load).
     """
     from poolbench.evaluation.disentanglement import compute_disentanglement_for_model  # noqa: PLC0415
 
@@ -882,6 +861,8 @@ def step_disentanglement(
             classifiers_dir   = CLASSIFIERS_DIR,
             out_dir           = D3_DIR,
             skip_existing     = skip_existing,
+            model             = model,
+            tokenizer         = tokenizer,
         )
 
     free_gpu_memory(device)
@@ -890,6 +871,62 @@ def step_disentanglement(
 
 
 # ── Full per-model pipeline ───────────────────────────────────────────────────
+
+def _steps_6_7_checkpoints_complete(
+    model_name: str,
+    concepts: list[str],
+    force_step6: bool,
+    force_step7: bool,
+) -> bool:
+    """
+    Return True only when *all three* of Steps 6, 6b, and 7 can be skipped due to
+    complete on-disk checkpoints.  Returns False immediately if any step is forced.
+    Used to avoid loading the 7–9 B LLM when a partial rerun has all three already done.
+    """
+    from poolbench.evaluation.scp_eval import PROMPTED_BASELINE_PROMPT_SET  # noqa: PLC0415
+    from poolbench.evaluation.disentanglement import NEIGHBOUR_PAIRS  # noqa: PLC0415
+
+    # Any forced step means we must rerun — don't bother checking files
+    if force_step6 or force_step7:
+        return False
+
+    strategy_ids = RANKED_STRATEGIES
+
+    # Step 6 — SCP
+    scp_path = SCP_DIR / f"{model_name}_scp.json"
+    if not scp_path.exists():
+        return False
+    scp_data = _safe_load_json(scp_path) or {}
+    if any(
+        c not in scp_data or any(sid not in scp_data.get(c, {}) for sid in strategy_ids)
+        for c in concepts
+    ):
+        return False
+
+    # Step 6b — Prompted baseline
+    pb_path = SCP_DIR / f"{model_name}_prompted_baseline.json"
+    if not pb_path.exists():
+        return False
+    pb_data = _safe_load_json(pb_path) or {}
+    if pb_data.get("_metadata", {}).get("prompt_set") != PROMPTED_BASELINE_PROMPT_SET:
+        return False
+    if _missing_keys(pb_data, concepts):
+        return False
+
+    # Step 7 — D3
+    d3_path = D3_DIR / f"{model_name}_d3.json"
+    if not d3_path.exists():
+        return False
+    d3_data = _safe_load_json(d3_path) or {}
+    d3_concepts = [c for c in concepts if c in NEIGHBOUR_PAIRS]
+    if any(
+        c not in d3_data or any(sid not in d3_data.get(c, {}) for sid in strategy_ids)
+        for c in d3_concepts
+    ):
+        return False
+
+    return True
+
 
 def run_model(model_name: str, args: argparse.Namespace) -> dict:
     """
@@ -918,6 +955,18 @@ def run_model(model_name: str, args: argparse.Namespace) -> dict:
         step_extract(model_name, device=args.device, concept_filter=concept_filter,
                      skip_existing=not force_step(1))
 
+    # Step 3 runs BEFORE the main pooling sweep (§38 pre-check requirement).
+    # Linearity is assessed on the middle candidate layer under mean pooling before
+    # any strategy ranking begins, so the check is not biased by layer selection.
+    _pre_check_layer = MODEL_CONFIGS[model_name]["candidate_layers"][
+        len(MODEL_CONFIGS[model_name]["candidate_layers"]) // 2
+    ]
+    step_linearity(model_name, _pre_check_layer,
+                   device=args.device,
+                   construction_method=getattr(args, "construction_method", DEFAULT_CONSTRUCTION),
+                   concept_filter=concept_filter,
+                   skip_existing=not force_step(3))
+
     auroc_summary = step_pool_and_auroc(
         model_name           = model_name,
         construction_method  = getattr(args, "construction_method", DEFAULT_CONSTRUCTION),
@@ -928,10 +977,6 @@ def run_model(model_name: str, args: argparse.Namespace) -> dict:
     log.info(f"  Best layer selected: {best_layer}")
 
     if not args.linearity_only:
-        step_linearity(model_name, best_layer,
-                       construction_method=getattr(args, "construction_method", DEFAULT_CONSTRUCTION),
-                       concept_filter=concept_filter,
-                       skip_existing=not force_step(3))
         step_icc(model_name,
                  construction_method=getattr(args, "construction_method", DEFAULT_CONSTRUCTION),
                  concept_filter=concept_filter,
@@ -945,17 +990,45 @@ def run_model(model_name: str, args: argparse.Namespace) -> dict:
             # Step 5 — Train Classifier B on GPU (BERT is small ~500 MB, releases before Step 6)
             step_train_classifiers(device=args.device, force_retrain=force_step(5))
 
+            # Steps 6, 6b, 7 share the same base LLM — load once, pass through all three.
+            # But skip the load entirely when all three steps are already checkpointed.
+            _concepts_for_check = [concept_filter] if concept_filter else list(CONCEPT_NAMES)
+            _need_model = not _steps_6_7_checkpoints_complete(
+                model_name,
+                _concepts_for_check,
+                force_step6=force_step(6),
+                force_step7=force_step(7),
+            )
+            if _need_model:
+                from poolbench.extract_activations import load_model as _load_model  # noqa: PLC0415
+                cfg = MODEL_CONFIGS[model_name]
+                log.info(f"  [shared model] Loading {model_name} for Steps 6/6b/7  GPU: {gpu_mem_str(args.device)}")
+                _shared_model, _shared_tok = _load_model(model_name, cfg["hf_id"], args.device)
+                log.info(f"  [shared model] Loaded  GPU: {gpu_mem_str(args.device)}")
+            else:
+                log.info(f"  [shared model] Steps 6/6b/7 fully checkpointed — skipping model load")
+                _shared_model, _shared_tok = None, None
+
             # Step 6 — D2 SCP
             step_scp(model_name, best_layer, args.device, concept_filter,
-                     skip_existing=not force_step(6))
+                     skip_existing=not force_step(6),
+                     model=_shared_model, tokenizer=_shared_tok)
 
             # Step 6b — Prompted baseline row (not ranked)
             step_prompted_baseline(model_name, args.device, concept_filter,
-                                   skip_existing=not force_step(6))
+                                   skip_existing=not force_step(6),
+                                   model=_shared_model, tokenizer=_shared_tok)
 
             # Step 7 — D3 Disentanglement
             step_disentanglement(model_name, best_layer, args.device, concept_filter,
-                                 skip_existing=not force_step(7))
+                                 skip_existing=not force_step(7),
+                                 model=_shared_model, tokenizer=_shared_tok)
+
+            # Release the shared LLM now that all three steps are done
+            if _need_model:
+                del _shared_model, _shared_tok
+                free_gpu_memory(args.device)
+                log.info(f"  [shared model] Released  GPU: {gpu_mem_str(args.device)}")
 
     # Load the best-layer auroc dict for Nemenyi aggregation
     best_layer_path = AUROC_DIR / model_name / "best_layer_auroc.json"
@@ -980,7 +1053,7 @@ def main():
     parser.add_argument("--model",    type=str, choices=list(MODEL_CONFIGS),
                         help="Model to run (single model)")
     parser.add_argument("--all",      action="store_true",
-                        help="Run all 7 models sequentially")
+                        help="Run all 3 models sequentially")
     parser.add_argument("--concept",  type=str, default=None,
                         help="Restrict to a single concept (for testing)")
     parser.add_argument("--device",   type=str, default="auto",

@@ -37,13 +37,15 @@ def pool_first_token(h: np.ndarray) -> np.ndarray:
 
 def pool_cls_token(h: np.ndarray) -> np.ndarray:
     """
-    P3_CLS — Return the hidden state at position 0 (CLS token).
-    For BERT-style encoder models this is the [CLS] sentinel designed to aggregate
-    sequence meaning. For causal LMs position 0 is the BOS token — still a valid
-    position-anchored pooling choice, symmetric to P1_last_token.
+    P3_CLS — Return the hidden state at position 1 (first content token after BOS).
+    For encoder models (BERT) position 0 is the [CLS] sentinel; for causal LMs
+    position 0 is the BOS token and position 1 is the first actual content token.
+    Using position 1 makes P3_CLS distinct from P2_first_token (position 0) on
+    all current benchmark models (causal LMs only).
+    Falls back to h[0] for single-token sequences.
     Citation: Devlin et al. BERT, NAACL 2019.
     """
-    return h[0]
+    return h[1] if len(h) > 1 else h[0]
 
 
 # ── UNIFORM AGGREGATION ──────────────────────────────────────────────────────
@@ -82,8 +84,10 @@ def pool_random(h: np.ndarray, seed: int = 42) -> np.ndarray:
     """
     A3_random — Random token sampling (noise-floor baseline).
     Selects a uniformly random 50% subset of token positions and averages.
-    Seed fixed at 42 for reproducibility. Any strategy that does not significantly
-    outperform A3_random is not performing meaningful token selection.
+    `seed` is passage-unique (caller passes 42 + passage_idx) so different
+    passages sample different positions while remaining fully reproducible.
+    Any strategy that does not significantly outperform A3_random is not
+    performing meaningful token selection.
     """
     rng = np.random.default_rng(seed)
     n_select = max(1, len(h) // 2)
@@ -273,18 +277,26 @@ def pool_subword_root_only(h: np.ndarray, token_ids: list[int], tokenizer) -> np
     """
     L4 — Pool only the first subword piece of each word.
     Avoids within-word averaging noise from continuation subword tokens.
-    Handles both BPE (▁ prefix) and WordPiece (## continuation) tokenizers.
-    Falls back to pool_mean if result is empty.
+
+    Tokenizer-family detection:
+    - WordPiece (BERT): continuation tokens start with '##' → root = not '##'
+    - SentencePiece (Gemma, Mistral, Llama2): word-initial tokens start with '▁'
+    - GPT-2/tiktoken BPE (Llama3): word-initial tokens start with 'Ġ' (U+0120)
+    Falls back to pool_mean if no root tokens are found.
     """
     tokens = tokenizer.convert_ids_to_tokens(token_ids)
+    # Detect tokenizer family from the token strings in this passage
+    uses_wordpiece = any(t.startswith("##") for t in tokens)
     root_mask = []
     for i, tok in enumerate(tokens):
         if i == 0:
             root_mask.append(True)
-        elif tok.startswith("▁") or tok.startswith(" ") or not tok.startswith("##"):
-            root_mask.append(True)   # new word
+        elif uses_wordpiece:
+            root_mask.append(not tok.startswith("##"))
         else:
-            root_mask.append(False)  # continuation subword
+            # SentencePiece (▁) or GPT/tiktoken BPE (Ġ): word-initial token
+            # carries an explicit space/underscore prefix; continuation pieces do not.
+            root_mask.append(tok.startswith("▁") or tok.startswith("Ġ"))
     selected = h[np.array(root_mask, dtype=bool)]
     return selected.mean(axis=0) if len(selected) > 0 else pool_mean(h)
 
@@ -722,7 +734,7 @@ def compute_pooled_vectors(
     dep_triggers = dep_triggers or []
     pooled = []
 
-    for item in activation_items:
+    for idx, item in enumerate(activation_items):
         h      = np.asarray(item["hidden"], dtype=np.float32)  # (seq_len, d_model)
         text   = item.get("text", "")
         offsets = item.get("offset_mapping", [])
@@ -742,6 +754,10 @@ def compute_pooled_vectors(
                 vec = pool_fn(h, tids, tokenizer)
             elif strategy_id == "L5_SVO":
                 vec = pool_fn(h, text, offsets)
+            elif strategy_id == "A3_random":
+                # Seed is passage-unique so each passage samples different positions
+                # (42 + idx), but remains deterministic / reproducible per run.
+                vec = pool_fn(h, seed=42 + idx)
             elif strategy_id == "S1_attention_weighted":
                 if attn is None:
                     raise RuntimeError("S1_attention_weighted requires attention weights")

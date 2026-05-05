@@ -56,8 +56,8 @@ NEIGHBOUR_PAIRS: dict[str, dict[str, str]] = {
     "planning":             {"LD": "bureaucratic",        "LC": "code_docs"},
 }
 
-# Models excluded from output-level D3 (no generation)
-NON_GENERATIVE_MODELS: set[str] = {"bert_base_uncased", "flan_t5_xl"}
+# Models excluded from output-level D3 (kept for reference; remove if all models are causal LMs)
+# NON_GENERATIVE_MODELS: set[str] = {}  # none — all benchmark models are causal decoder LMs
 
 
 # ── Steering vector helpers ───────────────────────────────────────────────────
@@ -70,6 +70,7 @@ def _compute_steering_vector(
     strategy_id: str,
     unigram_probs: dict | None = None,
     concept_probe=None,
+    tokenizer=None,
 ) -> Optional[np.ndarray]:
     """DiffMean steering vector for a (concept, strategy) pair. Returns unit-normalised (d_model,)."""
     from poolbench.extract_activations import load_activations  # noqa: PLC0415
@@ -85,14 +86,33 @@ def _compute_steering_vector(
         raise KeyError(f"Unknown pooling strategy for D3: {strategy_id}")
 
     try:
-        pos_vecs = compute_pooled_vectors(pos_acts, strategy_id,
+        pos_vecs_raw = compute_pooled_vectors(pos_acts, strategy_id,
+                          tokenizer=tokenizer,
                           unigram_probs=unigram_probs,
                           concept_probe=concept_probe)
-        neg_vecs = compute_pooled_vectors(neg_acts, strategy_id,
+        neg_vecs_raw = compute_pooled_vectors(neg_acts, strategy_id,
+                          tokenizer=tokenizer,
                           unigram_probs=unigram_probs,
                           concept_probe=concept_probe)
     except Exception as exc:
         raise RuntimeError(f"[d3] pooling failed for {concept_name}/{strategy_id}: {exc}") from exc
+
+    # S2_SIF requires first-PC subtraction on the combined pos+neg pool (§27),
+    # matching the D1 batch treatment in compute_pooled_vectors_batch.
+    if strategy_id == "S2_SIF" and unigram_probs:
+        from sklearn.decomposition import PCA  # noqa: PLC0415
+        combined = np.vstack([pos_vecs_raw, neg_vecs_raw])
+        pca = PCA(n_components=1)
+        pca.fit(combined)
+        pc1 = pca.components_[0]
+        def _sub(vecs):
+            proj = (vecs @ pc1)[:, None] * pc1[None, :]
+            return (vecs - proj).astype(np.float32)
+        pos_vecs = _sub(pos_vecs_raw)
+        neg_vecs = _sub(neg_vecs_raw)
+    else:
+        pos_vecs = pos_vecs_raw
+        neg_vecs = neg_vecs_raw
 
     if len(pos_vecs) == 0 or len(neg_vecs) == 0:
         raise RuntimeError(f"[d3] empty pooled vectors for {concept_name}/{strategy_id}")
@@ -128,6 +148,8 @@ def compute_disentanglement_for_model(
     classifiers_dir: str | Path,
     out_dir: str | Path,
     skip_existing: bool = True,
+    model=None,
+    tokenizer=None,
 ) -> dict:
     """
     Compute D3 disentanglement metrics for all (concept × strategy) pairs.
@@ -143,12 +165,6 @@ def compute_disentanglement_for_model(
         {out_dir}/{model_name}_d3.json
         → {concept: {strategy: {D3_LD, D3_LC, D3_rep}}}
     """
-    if model_name in NON_GENERATIVE_MODELS:
-        log.info(f"  [d3] {model_name} excluded from output-level D3 — skipping")
-        # Still compute D3_rep (cosine similarity in activation space)
-        return _compute_rep_only(model_name, best_layer, concepts, strategy_ids,
-                                 act_dir, out_dir, skip_existing)
-
     act_dir         = Path(act_dir)
     classifiers_dir = Path(classifiers_dir)
     out_dir         = Path(out_dir)
@@ -180,8 +196,7 @@ def compute_disentanglement_for_model(
 
     log.info(f"\n  [d3] Starting D3 disentanglement for {model_name}  GPU: {gpu_mem_str(device)}")
 
-    # Load LLM for re-generating steered outputs
-    from poolbench.extract_activations import load_model as _load_model  # noqa: PLC0415
+    # Load LLM for re-generating steered outputs (skip if caller already holds it)
     from poolbench.evaluation.scp_eval import (  # noqa: PLC0415
         _generate_with_steering, EVAL_PROMPTS, SCP_ALPHAS,
     )
@@ -190,8 +205,9 @@ def compute_disentanglement_for_model(
     from poolbench.pooling_strategies import (  # noqa: PLC0415
         build_unigram_probs_from_activations, build_iti_concept_probes,
     )
-
-    model, tokenizer = _load_model(model_name, hf_id, device)
+    if model is None or tokenizer is None:
+        from poolbench.extract_activations import load_model as _load_model  # noqa: PLC0415
+        model, tokenizer = _load_model(model_name, hf_id, device)
     log.info(f"  [d3] {model_name} loaded  GPU: {gpu_mem_str(device)}")
     layer_act_dir = Path(act_dir) / model_name / f"layer_{best_layer}"
     artefact_concepts = sorted(set(concepts) | {v for c in concepts for v in NEIGHBOUR_PAIRS.get(c, {}).values()})
@@ -228,6 +244,7 @@ def compute_disentanglement_for_model(
                 act_dir, model_name, best_layer, concept_name, _sid,
                 unigram_probs=unigram_probs,
                 concept_probe=concept_probes.get(concept_name),
+                tokenizer=tokenizer,
             )
             if _sv is not None:
                 _first_sv = _sv
@@ -252,6 +269,7 @@ def compute_disentanglement_for_model(
                 act_dir, model_name, best_layer, concept_name, strat_id,
                 unigram_probs=unigram_probs,
                 concept_probe=concept_probes.get(concept_name),
+                tokenizer=tokenizer,
             )
             if sv_a is None:
                 raise RuntimeError(f"[d3] no steering vector for {concept_name}/{strat_id}")

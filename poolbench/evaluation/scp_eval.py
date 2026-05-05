@@ -75,9 +75,6 @@ CURATED_CONCEPT_PROMPTS: dict[str, str] = {
     "planning": "Write the continuation as a goal-directed plan with concrete steps and sequencing: ",
 }
 
-# Models excluded from D2 (no text generation) — §10
-NON_GENERATIVE_MODELS: set[str] = {"bert_base_uncased", "flan_t5_xl"}
-
 # Concepts whose steered outputs must NOT be saved — §65
 DISCARD_OUTPUT_CONCEPTS: set[str] = {"toxicity", "depression"}
 
@@ -117,7 +114,7 @@ class _SteeringHook:
 def _get_layer_module(model, model_name: str, layer_idx: int):
     """Locate the transformer block to attach the steering hook."""
     try:
-        return model.model.layers[layer_idx]       # Llama / Mistral / Qwen / Gemma-2
+        return model.model.layers[layer_idx]       # Llama / Mistral / Gemma-2
     except AttributeError:
         pass
     try:
@@ -137,6 +134,7 @@ def _compute_steering_vector(
     strategy_id: str,
     unigram_probs: dict | None = None,
     concept_probe=None,
+    tokenizer=None,
 ) -> Optional[np.ndarray]:
     """
     Compute the DiffMean steering vector for a (concept, strategy) pair.
@@ -153,15 +151,35 @@ def _compute_steering_vector(
         raise RuntimeError(f"[scp] missing train activations for {concept_name} L{layer_idx}")
 
     try:
-        pos_vecs = compute_pooled_vectors(pos_acts, strategy_id,
+        pos_vecs_raw = compute_pooled_vectors(pos_acts, strategy_id,
+                          tokenizer=tokenizer,
                           unigram_probs=unigram_probs,
                           concept_probe=concept_probe)  # (N, d_model)
-        neg_vecs = compute_pooled_vectors(neg_acts, strategy_id,
+        neg_vecs_raw = compute_pooled_vectors(neg_acts, strategy_id,
+                          tokenizer=tokenizer,
                           unigram_probs=unigram_probs,
                           concept_probe=concept_probe)
     except Exception as exc:
         log.error(f"    [scp] pooling error {concept_name}/{strategy_id}: {exc}")
         return None
+
+    # S2_SIF requires first-PC subtraction on the combined pos+neg pool (§27).
+    # This must be applied here (not inside compute_pooled_vectors) so the PCA
+    # is fitted on the same distribution used in D1.
+    if strategy_id == "S2_SIF" and unigram_probs:
+        from sklearn.decomposition import PCA  # noqa: PLC0415
+        combined = np.vstack([pos_vecs_raw, neg_vecs_raw])
+        pca = PCA(n_components=1)
+        pca.fit(combined)
+        pc1 = pca.components_[0]
+        def _sub(vecs):
+            proj = (vecs @ pc1)[:, None] * pc1[None, :]
+            return (vecs - proj).astype(np.float32)
+        pos_vecs = _sub(pos_vecs_raw)
+        neg_vecs = _sub(neg_vecs_raw)
+    else:
+        pos_vecs = pos_vecs_raw
+        neg_vecs = neg_vecs_raw
 
     if len(pos_vecs) == 0 or len(neg_vecs) == 0:
         raise RuntimeError(f"[scp] empty pooled vectors for {concept_name}/{strategy_id}")
@@ -242,6 +260,17 @@ def _compute_perplexity(model, tokenizer, texts: list[str], device: str) -> floa
     return math.exp(total_nll / total_tok) if total_tok > 0 else float("inf")
 
 
+def _mean_token_length(tokenizer, texts: list[str]) -> float:
+    """Return mean token count across texts (for Phi_c length normalisation §48)."""
+    if not texts:
+        return 1.0
+    total = sum(
+        len(tokenizer(t, truncation=True, max_length=256)["input_ids"])
+        for t in texts
+    )
+    return total / len(texts)
+
+
 # ── Per-concept SCP ───────────────────────────────────────────────────────────
 
 def _compute_concept_scp(
@@ -282,6 +311,7 @@ def _compute_concept_scp(
             act_dir, model_name, layer_idx, concept_name, _sid,
             unigram_probs=unigram_probs,
             concept_probe=concept_probes.get(concept_name) if concept_probes else None,
+            tokenizer=tokenizer,
         )
         if _sv is not None:
             _first_sv = _sv
@@ -297,13 +327,15 @@ def _compute_concept_scp(
     baseline_scores = score_texts(baseline_texts, classifier, classifier_tok, device)
     baseline_score  = float(np.mean(baseline_scores))
     baseline_ppl    = _compute_perplexity(model, tokenizer, baseline_texts, device)
-    log.info(f"      [baseline] score={baseline_score:.4f}  ppl={baseline_ppl:.1f}")
+    baseline_len    = _mean_token_length(tokenizer, baseline_texts)   # for Phi_c §48
+    log.info(f"      [baseline] score={baseline_score:.4f}  ppl={baseline_ppl:.1f}  len={baseline_len:.1f}")
 
     for strat_id in strategy_ids:
         sv = _compute_steering_vector(
             act_dir, model_name, layer_idx, concept_name, strat_id,
             unigram_probs=unigram_probs,
             concept_probe=concept_probes.get(concept_name) if concept_probes else None,
+            tokenizer=tokenizer,
         )
         if sv is None:
             raise RuntimeError(f"[scp] no steering vector for {concept_name}/{strat_id}")
@@ -326,10 +358,14 @@ def _compute_concept_scp(
         # SCP primary metric at α=1.0
         scp_c = per_alpha.get("1.0", 0.0)
 
-        # Φ_c — fluency diagnostic at α=1.0 (reuse already-generated texts)
-        steered_ppl_1 = _compute_perplexity(model, tokenizer, steered_texts_at_1, device) \
-                        if steered_texts_at_1 else baseline_ppl
-        phi_c = (steered_ppl_1 / baseline_ppl) if baseline_ppl > 0 else 1.0
+        # Φ_c — length-normalised fluency diagnostic at α=1.0 (§48)
+        # Formula: (ppl_steered / ppl_baseline) × (len_baseline / len_steered)
+        steered_ppl_1  = _compute_perplexity(model, tokenizer, steered_texts_at_1, device) \
+                         if steered_texts_at_1 else baseline_ppl
+        steered_len_1  = _mean_token_length(tokenizer, steered_texts_at_1) \
+                         if steered_texts_at_1 else baseline_len
+        len_correction = (baseline_len / steered_len_1) if steered_len_1 > 0 else 1.0
+        phi_c = (steered_ppl_1 / baseline_ppl) * len_correction if baseline_ppl > 0 else 1.0
 
         # M_c — Spearman ρ(alphas, deltas)
         alphas_arr = SCP_ALPHAS
@@ -361,21 +397,21 @@ def compute_scp_for_model(
     classifiers_dir: str | Path,
     out_dir: str | Path,
     skip_existing: bool = True,
+    model=None,
+    tokenizer=None,
 ) -> dict:
     """
     Full D2 SCP computation for one model across all (concept × strategy) pairs.
 
-    Loads the model once, iterates over concepts, and releases memory at the end.
-    For BERT/FLAN-T5, logs a skip message and returns {}.
+    If `model` and `tokenizer` are provided (pre-loaded by the caller) the
+    function skips its own _load_model call, avoiding a redundant load when SCP,
+    prompted_baseline, and D3 are run back-to-back.  When omitted, the model is
+    loaded and owned locally.
 
     Saves:
         {out_dir}/{model_name}_scp.json
         → {concept: {strategy_id: {SCP_c, phi_c, M_c, per_alpha}}}
     """
-    if model_name in NON_GENERATIVE_MODELS:
-        log.info(f"  [scp] {model_name} excluded from D2 (no generation) — skipping")
-        return {}
-
     act_dir         = Path(act_dir)
     classifiers_dir = Path(classifiers_dir)
     out_dir         = Path(out_dir)
@@ -397,14 +433,15 @@ def compute_scp_for_model(
     else:
         all_results: dict[str, dict] = {}
 
-    # ── Load LLM ─────────────────────────────────────────────────────────────
+    # ── Load LLM (skip if caller already holds the model in memory) ─────────
     log.info(f"\n  [scp] Starting D2 SCP for {model_name}  GPU: {gpu_mem_str(device)}")
-    from poolbench.extract_activations import load_model as _load_model  # noqa: PLC0415
     from poolbench.concepts import CONCEPTS  # noqa: PLC0415
     from poolbench.pooling_strategies import (  # noqa: PLC0415
         build_unigram_probs_from_activations, build_iti_concept_probes,
     )
-    model, tokenizer = _load_model(model_name, hf_id, device)
+    if model is None or tokenizer is None:
+        from poolbench.extract_activations import load_model as _load_model  # noqa: PLC0415
+        model, tokenizer = _load_model(model_name, hf_id, device)
     log.info(f"  [scp] {model_name} loaded  GPU: {gpu_mem_str(device)}")
     layer_act_dir = Path(act_dir) / model_name / f"layer_{best_layer}"
     concepts_meta = {c: CONCEPTS[c] for c in concepts if c in CONCEPTS}
@@ -465,6 +502,9 @@ def compute_prompted_baseline(
     classifiers_dir: str | Path,
     out_dir: str | Path,
     concept_prompts: dict[str, str] | None = None,
+    model=None,
+    tokenizer=None,
+    skip_existing: bool = True,
 ) -> dict:
     """
     Generate text with a keyword-prefixed prompt (unsteered model) and score with
@@ -473,27 +513,28 @@ def compute_prompted_baseline(
     concept_prompts: {concept: curated short_instruction_prefix}. If omitted,
     CURATED_CONCEPT_PROMPTS is used. Missing concept prompts are treated as an
     error so the prompted baseline cannot silently fall back to generic prompts.
-    """
-    if model_name in NON_GENERATIVE_MODELS:
-        return {}
 
+    skip_existing: when False, discards any on-disk checkpoint and recomputes all
+    concepts from scratch (honouring the caller's --force_from_step intent).
+    """
     classifiers_dir = Path(classifiers_dir)
     out_dir         = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{model_name}_prompted_baseline.json"
 
     log.info(f"\n  [scp] Computing prompted baseline for {model_name}")
-    from poolbench.extract_activations import load_model as _load_model  # noqa: PLC0415
     from poolbench.evaluation.classifier_b import load_classifier_b, score_texts  # noqa: PLC0415
     import torch  # noqa: PLC0415
 
-    model, tokenizer = _load_model(model_name, hf_id, device)
+    if model is None or tokenizer is None:
+        from poolbench.extract_activations import load_model as _load_model  # noqa: PLC0415
+        model, tokenizer = _load_model(model_name, hf_id, device)
     prompts = concept_prompts or CURATED_CONCEPT_PROMPTS
     missing_prompts = [c for c in concepts if c not in prompts]
     if missing_prompts:
         raise RuntimeError(f"Missing curated prompted-baseline prompts for: {missing_prompts}")
 
-    if out_path.exists():
+    if out_path.exists() and skip_existing:
         with open(out_path) as f:
             existing = json.load(f)
         if existing.get("_metadata", {}).get("prompt_set") == PROMPTED_BASELINE_PROMPT_SET:

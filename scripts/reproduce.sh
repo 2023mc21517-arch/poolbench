@@ -29,7 +29,7 @@ python scripts/power_analysis.py
 # ── Step 3: Per-model experiments ────────────────────────────────────────────
 echo ""
 echo "=== Step 3: Running experiments ==="
-for model in llama3_8b gemma2_9b mistral_7b qwen25_7b flan_t5_xl mamba2_2b7 bert_base_uncased; do
+for model in llama3_8b gemma2_9b mistral_7b; do
     echo ""
     echo "--- Model: $model ---"
     python scripts/run_model.py --model "$model" --device "$DEVICE"

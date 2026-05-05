@@ -120,10 +120,9 @@ def compute_auroc_for_strategy(
 
     fold_aurocs_arr = np.array(fold_aurocs)
     rng             = np.random.default_rng(RANDOM_SEED)
-    boot_means      = [
-        rng.choice(fold_aurocs_arr, size=len(fold_aurocs_arr), replace=True).mean()
-        for _ in range(n_bootstrap)
-    ]
+    # Vectorized bootstrap: sample all n_bootstrap resamples at once
+    idx        = rng.integers(0, len(fold_aurocs_arr), size=(n_bootstrap, len(fold_aurocs_arr)))
+    boot_means = fold_aurocs_arr[idx].mean(axis=1)
     ci_low, ci_high = float(np.percentile(boot_means, 2.5)), float(np.percentile(boot_means, 97.5))
 
     return {
@@ -188,54 +187,88 @@ def compute_train_test_auroc_for_strategy(
     test_pos_pooled: np.ndarray,
     test_neg_pooled: np.ndarray,
     construction_method: str = DEFAULT_CONSTRUCTION,
-    n_bootstrap: int = N_BOOTSTRAP,
+    n_folds: int             = N_FOLDS,
+    n_bootstrap: int         = N_BOOTSTRAP,
     sae_model=None,
 ) -> dict[str, float]:
-    """Train the concept direction on the train split and evaluate AUROC on test."""
+    """
+    D1 AUROC using 5-fold stratified cross-validation on the *train* split (§38).
+
+    Protocol
+    --------
+    1. Combine train_pos + train_neg into one pool (n ≈ 1,400 per concept).
+    2. Run 5-fold stratified CV:  in each fold train the concept direction on the
+       fold's train set, score the fold's held-out set.
+    3. Concatenate all out-of-fold (OOF) scores into a single vector of length n.
+    4. Compute AUROC from the full OOF score vector.
+    5. Bootstrap 95% CI by resampling individual OOF (score, label) pairs 1,000×.
+
+    The *test* split (300 passages/class) is received for API compatibility and for
+    n_pos/n_neg reporting but is NOT used for AUROC — it is reserved for
+    Classifier A held-out evaluation (§53 quality check 1).
+    """
+    from sklearn.model_selection import StratifiedKFold  # noqa: PLC0415
+
     train_pos = train_pos_pooled.astype(np.float32)
     train_neg = train_neg_pooled.astype(np.float32)
-    test_pos  = test_pos_pooled.astype(np.float32)
-    test_neg  = test_neg_pooled.astype(np.float32)
-
     train_pos /= np.linalg.norm(train_pos, axis=1, keepdims=True) + 1e-9
     train_neg /= np.linalg.norm(train_neg, axis=1, keepdims=True) + 1e-9
-    test_pos  /= np.linalg.norm(test_pos,  axis=1, keepdims=True) + 1e-9
-    test_neg  /= np.linalg.norm(test_neg,  axis=1, keepdims=True) + 1e-9
+
+    X = np.vstack([train_pos, train_neg])
+    y = np.array([1] * len(train_pos) + [0] * len(train_neg), dtype=np.int32)
 
     construct_fn = get_construction_method(construction_method)
-    if construction_method == "C5_sae_feature":
-        d = construct_fn(train_pos, train_neg, sae_model)
-        if d is None:
-            from poolbench.construction.methods import construct_difmean as _dm  # noqa
-            d = _dm(train_pos, train_neg)
-    else:
-        d = construct_fn(train_pos, train_neg)
+    kf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=RANDOM_SEED)
 
-    y_test = np.array([1] * len(test_pos) + [0] * len(test_neg), dtype=np.int32)
-    scores = np.concatenate([test_pos @ d, test_neg @ d])
-    auroc = _auroc_from_scores(y_test, scores)
+    oof_scores = np.empty(len(y), dtype=np.float32)
+    oof_labels = np.empty(len(y), dtype=np.int32)
 
-    rng = np.random.default_rng(RANDOM_SEED)
-    n = len(y_test)
-    boot = []
-    for _ in range(n_bootstrap):
-        idx = rng.choice(n, size=n, replace=True)
-        if len(np.unique(y_test[idx])) < 2:
+    for tr_idx, te_idx in kf.split(X, y):
+        X_tr, y_tr = X[tr_idx], y[tr_idx]
+        X_te, y_te = X[te_idx], y[te_idx]
+        pos_tr = X_tr[y_tr == 1]
+        neg_tr = X_tr[y_tr == 0]
+        if len(pos_tr) == 0 or len(neg_tr) == 0:
+            oof_scores[te_idx] = 0.0
+            oof_labels[te_idx] = y_te
             continue
-        boot.append(_auroc_from_scores(y_test[idx], scores[idx]))
-    ci_low, ci_high = (float(np.percentile(boot, 2.5)), float(np.percentile(boot, 97.5))) if boot else (auroc, auroc)
+        if construction_method == "C5_sae_feature":
+            d = construct_fn(pos_tr, neg_tr, sae_model)
+            if d is None:
+                from poolbench.construction.methods import construct_difmean as _dm  # noqa
+                d = _dm(pos_tr, neg_tr)
+        else:
+            d = construct_fn(pos_tr, neg_tr)
+        oof_scores[te_idx] = X_te @ d
+        oof_labels[te_idx] = y_te
+
+    auroc = _auroc_from_scores(oof_labels, oof_scores)
+
+    # Bootstrap on individual OOF (score, label) pairs — not fold means (§38)
+    rng = np.random.default_rng(RANDOM_SEED)
+    n   = len(oof_labels)
+    idx = rng.integers(0, n, size=(n_bootstrap, n))
+    boot = []
+    for row in idx:
+        if len(np.unique(oof_labels[row])) < 2:
+            continue
+        boot.append(_auroc_from_scores(oof_labels[row], oof_scores[row]))
+    ci_low, ci_high = (
+        (float(np.percentile(boot, 2.5)), float(np.percentile(boot, 97.5)))
+        if boot else (auroc, auroc)
+    )
 
     return {
-        "auroc": auroc,
-        "ci_low": ci_low,
-        "ci_high": ci_high,
-        "std": float(np.std(boot)) if boot else 0.0,
-        "n_train_pos": len(train_pos),
-        "n_train_neg": len(train_neg),
-        "n_pos": len(test_pos),
-        "n_neg": len(test_neg),
+        "auroc":            auroc,
+        "ci_low":           ci_low,
+        "ci_high":          ci_high,
+        "std":              float(np.std(boot)) if boot else 0.0,
+        "n_train_pos":      len(train_pos),
+        "n_train_neg":      len(train_neg),
+        "n_pos":            len(test_pos_pooled),   # test split reported but not used for AUROC
+        "n_neg":            len(test_neg_pooled),
         "construction_method": construction_method,
-        "protocol": "train_test",
+        "protocol":         "5fold_oof",
     }
 
 
@@ -443,12 +476,15 @@ def check_linearity_assumption(
     neg_pooled: np.ndarray,
     concept_name: str,
     construction_method: str = DEFAULT_CONSTRUCTION,
+    device: str = "cpu",
 ) -> dict[str, Any]:
     """
     Linearity validation (Appendix C requirement).
     Compare a linear logistic probe with a 2-layer MLP on the SAME activations.
     Threshold: gap < LINEARITY_GAP_THRESHOLD (0.03 AUROC) → concept is "linearly
     representable" in the chosen pooling space.
+
+    The MLP runs on `device` (GPU when called from the main pipeline).
 
     Returns
     -------
@@ -460,9 +496,20 @@ def check_linearity_assumption(
       "gap":           float,
     }
     """
+    import torch                          # noqa: PLC0415
+    import torch.nn as nn                 # noqa: PLC0415
     from sklearn.model_selection import StratifiedKFold  # noqa: PLC0415
-    from sklearn.neural_network import MLPClassifier
-    from sklearn.preprocessing import StandardScaler
+
+    class _MLP(nn.Module):
+        def __init__(self, in_features: int) -> None:
+            super().__init__()
+            self.net = nn.Sequential(
+                nn.Linear(in_features, 128), nn.ReLU(),
+                nn.Linear(128, 64),          nn.ReLU(),
+                nn.Linear(64, 2),
+            )
+        def forward(self, x: "torch.Tensor") -> "torch.Tensor":
+            return self.net(x)
 
     X   = np.vstack([pos_pooled, neg_pooled]).astype(np.float32)
     y   = np.array([1] * len(pos_pooled) + [0] * len(neg_pooled), dtype=np.int32)
@@ -490,17 +537,40 @@ def check_linearity_assumption(
         lin_scores = X_te @ d
         lin_aurocs.append(_auroc_from_scores(y_te, lin_scores))
 
-        # MLP: 2-layer, hidden=128, ReLU
-        scaler = StandardScaler()
-        X_tr_s = scaler.fit_transform(X_tr)
-        X_te_s = scaler.transform(X_te)
-        mlp = MLPClassifier(
-            hidden_layer_sizes=(128, 64), activation="relu",
-            max_iter=300, random_state=RANDOM_SEED, early_stopping=True,
-        )
-        mlp.fit(X_tr_s, y_tr)
-        mlp_scores = mlp.predict_proba(X_te_s)[:, 1]
-        mlp_aurocs.append(_auroc_from_scores(y_te, mlp_scores))
+        # MLP (2-layer, hidden=128→64, ReLU) — runs on device
+        mu   = X_tr.mean(axis=0, keepdims=True)
+        std  = X_tr.std(axis=0, keepdims=True) + 1e-8
+        X_tr_s = (X_tr - mu) / std
+        X_te_s = (X_te - mu) / std
+
+        mlp = _MLP(X_tr.shape[1]).to(device)
+        if "cuda" in device and os.environ.get("POOLBENCH_COMPILE_LINEARITY_MLP", "0") == "1":
+            try:
+                mlp = torch.compile(mlp)   # PyTorch ≥ 2.0; costs ~30–60 s cold-start per fold
+            except Exception:
+                pass
+        optimizer = torch.optim.Adam(mlp.parameters(), lr=1e-3)
+        loss_fn   = nn.CrossEntropyLoss()
+
+        tr_t  = torch.from_numpy(X_tr_s).to(device)
+        y_tr_t = torch.from_numpy(y_tr.astype(np.int64)).to(device)
+        te_t  = torch.from_numpy(X_te_s).to(device)
+
+        mlp.train()
+        for _ in range(300):
+            optimizer.zero_grad()
+            loss = loss_fn(mlp(tr_t), y_tr_t)
+            loss.backward()
+            optimizer.step()
+
+        mlp.eval()
+        with torch.no_grad():
+            probs = torch.softmax(mlp(te_t), dim=-1)[:, 1].cpu().numpy()
+        mlp_aurocs.append(_auroc_from_scores(y_te, probs))
+
+        del mlp, tr_t, te_t, y_tr_t
+        if "cuda" in device:
+            torch.cuda.empty_cache()
 
     linear_auroc = float(np.mean(lin_aurocs))
     mlp_auroc    = float(np.mean(mlp_aurocs))
