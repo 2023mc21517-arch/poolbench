@@ -53,6 +53,7 @@ from poolbench.probe_training       import (compute_all_auroc, check_linearity_a
                                       compute_all_train_test_auroc)
 from poolbench.extract_activations  import extract_activations_for_model, load_activations
 from poolbench.logger               import get_logger, gpu_mem_str, free_gpu_memory, log_step, find_free_gpu
+from poolbench.sae_loader           import load_sae, clear_sae_cache
 
 
 # ── Model configs ─────────────────────────────────────────────────────────────
@@ -240,6 +241,17 @@ def step_extract(model_name: str, device: str, skip_existing: bool = True,
 
 # ── Step 2: Pool + compute AUROC per layer, select best ───────────────────────
 
+def _load_sae_for_step2(model_name: str, layer_idx: int, construction_method: str):
+    """
+    Load the pre-trained SAE for C5 if requested; return None otherwise.
+    Errors are non-fatal — the SAE loader logs a warning and returns None,
+    which causes construct_sae_feature() to fall back to C1 DifMean.
+    """
+    if construction_method != "C5_sae_feature":
+        return None
+    return load_sae(model_name, layer_idx)
+
+
 def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONSTRUCTION,
                         concept_filter: str | None = None,
                         skip_existing: bool = True,
@@ -342,6 +354,7 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
             model_name           = model_name,
             out_dir              = layer_auroc_dir,
             construction_method  = construction_method,
+            sae_model            = _load_sae_for_step2(model_name, layer_idx, construction_method),
         )
         if concept_filter is not None:
             auroc_res = _merge_auroc_results(existing_layer, auroc_res, list(concepts_to_run))
@@ -390,6 +403,10 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
             "layer_selection_concepts": LAYER_SELECTION_REPRESENTATIVE_CONCEPTS,
             "layer_selection_strategies": LAYER_SELECTION_STRATEGIES,
         }, f, indent=2)
+
+    # Release SAE objects so GPU memory is free for subsequent steps
+    if construction_method == "C5_sae_feature":
+        clear_sae_cache()
 
     return {"best_layer": best_layer, "per_layer": per_layer_results}
 
