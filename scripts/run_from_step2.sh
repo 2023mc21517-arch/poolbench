@@ -40,17 +40,22 @@ git --no-pager log --oneline -5
 #   Steps 3 → 2 → 4 → 4b → 5 → 6 → 6b → 7 → 8  (C1 DiffMean full pipeline)
 #   Then C2/C3/C4/C5 construction sweep (AUROC only) automatically at the end.
 #
-# --force_from_step 2 recomputes Steps 2-8:
-#   Reason: A3_random seeding was wrong in D1 (now fixed); planning Classifier B
-#   had wrong negatives (auto-retrain triggered by ANCHOR_FIXED_CONCEPTS).
+# Checkpoint-resume behaviour:
+#   --force_from_step is NOT passed intentionally.  This means skip_existing=True
+#   applies to every step — any step whose output file already exists on disk is
+#   skipped instantly and the pipeline continues from where it left off.
+#   Re-run with --force_from_step N only if you need to recompute from Step N.
+#
+# Historical note: a previous run used --force_from_step 2 to fix an A3_random
+# seeding bug and a planning Classifier B issue.  Those fixes are now baked into
+# the checkpoints; forcing a rerun is no longer necessary.
 # ─────────────────────────────────────────────────────────────────────────────
 
 for MODEL in mistral_7b llama3_8b gemma2_9b; do
-    log "PHASE 1 — $MODEL: full pipeline (Steps 2–8 + C2–C5 sweep)"
+    log "PHASE 1 — $MODEL: resume / complete pipeline (Steps 2–8 + C2–C5 sweep, skip existing)"
     $PY scripts/run_model.py \
         --model "$MODEL" \
         --skip_extraction \
-        --force_from_step 2 \
         --device "$GPU"
 done
 
