@@ -585,18 +585,30 @@ def step_icc(model_name: str, construction_method: str = DEFAULT_CONSTRUCTION,
 # ── Step 9 (post-all-models): Nemenyi strategy significance test ─────────────
 
 def step_nemenyi(all_model_auroc_results: dict[str, dict],
-                 concept_filter: str | None = None) -> None:
+                 concept_filter: str | None = None,
+                 skip_existing: bool = True) -> None:
     """
     Run the Nemenyi test over all 3 models jointly.
     Should be called after all models have completed steps 1–2.
 
     all_model_auroc_results: {model_name: {concept_strategy: {auroc: float}}}
+    skip_existing: when True, skip if the output file already contains results
+    for exactly the same set of models (re-runs when a new model is added).
     """
     log.info(f"\n=== Step 9: Nemenyi strategy significance test ===  GPU: {gpu_mem_str()}")
     NEMENYI_DIR.mkdir(parents=True, exist_ok=True)
 
     concepts = CONCEPT_NAMES if concept_filter is None else [concept_filter]
     models   = list(all_model_auroc_results.keys())
+
+    # Checkpoint guard: skip if output exists and covers exactly the same models
+    out_path = NEMENYI_DIR / "nemenyi_strategy_significance.json"
+    if skip_existing and out_path.exists():
+        existing = _safe_load_json(out_path)
+        if existing and sorted(existing.get("models", [])) == sorted(models):
+            log.info(f"  [checkpoint] Step 9 already complete for models {models} → {out_path}; skipping")
+            return
+        log.info(f"  [checkpoint] Step 9 output exists but model set changed — recomputing")
     effective_n = 0.0
     for model_name in models:
         icc_path = ICC_DIR / f"{model_name}_icc.json"
@@ -623,6 +635,7 @@ def step_nemenyi(all_model_auroc_results: dict[str, dict],
     result_serialisable = {k: v for k, v in result.items() if k != "nemenyi_pvalues"}
     result_serialisable["nemenyi_pvalues"] = result["nemenyi_pvalues"].tolist() \
         if isinstance(result.get("nemenyi_pvalues"), np.ndarray) else None
+    result_serialisable["models"] = sorted(models)  # used by checkpoint guard on re-run
 
     out_path = NEMENYI_DIR / "nemenyi_strategy_significance.json"
     with open(out_path, "w") as f:
@@ -1190,7 +1203,8 @@ def main():
                 data = json.load(f)
             bl = data.get("best_layer")
             all_results[mn] = data.get("per_layer", {}).get(str(bl), {})
-        step_nemenyi(all_results, concept_filter=args.concept)
+        step_nemenyi(all_results, concept_filter=args.concept,
+                     skip_existing=getattr(args, "force_from_step", None) is None)
         return
 
     models_to_run = list(MODEL_CONFIGS) if args.all else ([args.model] if args.model else None)
@@ -1207,7 +1221,8 @@ def main():
         all_auroc_results[model_name] = model_results
 
     if args.all and not args.linearity_only:
-        step_nemenyi(all_auroc_results, concept_filter=args.concept)
+        step_nemenyi(all_auroc_results, concept_filter=args.concept,
+                     skip_existing=getattr(args, "force_from_step", None) is None)
 
     # Run layer rank correlation analysis after each model (or all models)
     if not args.linearity_only and not args.nemenyi_only:

@@ -607,6 +607,10 @@ def compute_prompted_baseline(
             del clf
             free_gpu_memory(device)
 
+        # Partial save after each concept — crash-safe (mirrors SCP step behaviour)
+        with open(out_path, "w") as f:
+            json.dump(baseline_results, f, indent=2)
+
     del model, tokenizer
     free_gpu_memory(device)
 
