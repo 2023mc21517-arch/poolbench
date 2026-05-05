@@ -33,7 +33,7 @@ die() { echo -e "\033[1;31m[FATAL] $*\033[0m" >&2; exit 1; }
 [[ -f scripts/run_model.py ]] || die "Must be run from the repo root or scripts/ parent."
 
 log "Git status"
-git log --oneline -5
+git --no-pager log --oneline -5
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PHASE 1 — C1 DiffMean pipeline, all 3 models
