@@ -24,7 +24,7 @@ REPO_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$REPO_DIR"
 
 GPU="cuda:0"
-PY="python"
+PY="$(command -v python3 || command -v python)"
 
 log() { echo -e "\n\033[1;34m[run_from_step2] $*\033[0m"; }
 die() { echo -e "\033[1;31m[FATAL] $*\033[0m" >&2; exit 1; }
