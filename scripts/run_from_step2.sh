@@ -11,10 +11,11 @@
 #   bash scripts/run_from_step2.sh
 #
 # What this does (in order):
-#   Phase 1 — C1 DiffMean pipeline, Steps 2-8, for each model
-#   Phase 2 — Nemenyi + layer rank correlation (auto via --nemenyi_only)
-#   Phase 3 — C2/C3/C4 construction sweep for all models (Appendix E)
-#   Phase 4 — C5 SAE construction sweep (separate; requires SAELens weights)
+#   For each model (Mistral → Llama → Gemma):
+#     Phase 1 — C1 DiffMean full pipeline, Steps 2-8
+#     Phase 2 — C2/C3/C4 construction sweep (AUROC only, Appendix E)
+#     Phase 3 — C5 SAE construction sweep (separate; requires SAELens weights)
+#   Phase 4 — Nemenyi + layer rank correlation (after all models complete)
 #   Phase 5 — External anchor validation (oracle eval, top-5 strategies)
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
@@ -36,7 +37,7 @@ log "Git status"
 git --no-pager log --oneline -5
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PHASE 1 — C1 DiffMean pipeline, all 3 models
+# Per-model loop: C1 full pipeline + C2/C3/C4/C5 sweep, all within same model
 # --force_from_step 2  →  recomputes Steps 2-8 (Step 1/extraction skipped)
 #   Reason: A3_random seeding was wrong in D1 (now fixed); planning Classifier B
 #   had wrong negatives (auto-retrain triggered by ANCHOR_FIXED_CONCEPTS).
@@ -44,53 +45,23 @@ git --no-pager log --oneline -5
 #   with the corrected Step 2 AUROC values.
 # ─────────────────────────────────────────────────────────────────────────────
 
-log "PHASE 1a — Mistral (Steps 2–8, forced from Step 2)"
-$PY scripts/run_model.py \
-    --model mistral_7b \
-    --skip_extraction \
-    --force_from_step 2 \
-    --device "$GPU"
+for MODEL in mistral_7b llama3_8b gemma2_9b; do
 
-log "PHASE 1b — Llama (Steps 2–8, forced from Step 2)"
-$PY scripts/run_model.py \
-    --model llama3_8b \
-    --skip_extraction \
-    --force_from_step 2 \
-    --device "$GPU"
+    log "PHASE 1 — $MODEL: C1 DiffMean full pipeline (Steps 2–8)"
+    $PY scripts/run_model.py \
+        --model "$MODEL" \
+        --skip_extraction \
+        --force_from_step 2 \
+        --device "$GPU"
 
-log "PHASE 1c — Gemma (Steps 2–8, forced from Step 2)"
-$PY scripts/run_model.py \
-    --model gemma2_9b \
-    --skip_extraction \
-    --force_from_step 2 \
-    --device "$GPU"
-
-# ─────────────────────────────────────────────────────────────────────────────
-# PHASE 2 — Step 9: Nemenyi + layer rank correlation
-# All 3 models now complete → run significance test.
-# layer_rank_correlation.py runs automatically inside run_model.py's main()
-# but --nemenyi_only re-reads the saved AUROC files cleanly without re-running
-# any model steps.
-# ─────────────────────────────────────────────────────────────────────────────
-
-log "PHASE 2 — Nemenyi significance test + layer rank correlation"
-$PY scripts/run_model.py \
-    --nemenyi_only \
-    --device cpu
-
-# ─────────────────────────────────────────────────────────────────────────────
-# PHASE 3 — C2/C3/C4 construction sweep (Appendix E §35)
-# Runs Step 2 only for each method × model combination.
-# --skip_scp omits Steps 5-8 (SCP/D3/SAE) — only AUROC is needed for the
-# Spearman ρ rank-correlation check vs C1.
-# Results go to results/auroc/{model}/{method}/ — never touches C1 files.
-# ─────────────────────────────────────────────────────────────────────────────
-
-log "PHASE 3 — C2/C3/C4 construction sweep"
-
-for METHOD in C2_pca C3_logreg C4_repe; do
-    for MODEL in mistral_7b llama3_8b gemma2_9b; do
-        log "  Construction sweep: model=$MODEL method=$METHOD"
+    # ─────────────────────────────────────────────────────────────────────────
+    # PHASE 2 (per model) — C2/C3/C4 construction sweep (Appendix E §35)
+    # --skip_scp omits Steps 5-8 (SCP/D3/SAE) — only AUROC needed for the
+    # Spearman ρ rank-correlation check vs C1.
+    # Results go to results/auroc/{model}/{method}/ — never touches C1 files.
+    # ─────────────────────────────────────────────────────────────────────────
+    for METHOD in C2_pca C3_logreg C4_repe; do
+        log "PHASE 2 — $MODEL: construction sweep method=$METHOD"
         $PY scripts/run_model.py \
             --model "$MODEL" \
             --skip_extraction \
@@ -99,18 +70,12 @@ for METHOD in C2_pca C3_logreg C4_repe; do
             --force_from_step 2 \
             --device "$GPU"
     done
-done
 
-# ─────────────────────────────────────────────────────────────────────────────
-# PHASE 4 — C5 SAE construction sweep
-# Requires SAELens weights to be available (GemmaScope / LlamaScope / jbloom).
-# Runs separately so a missing SAE weight file doesn't abort phases 1-3.
-# ─────────────────────────────────────────────────────────────────────────────
-
-log "PHASE 4 — C5 SAE construction sweep"
-
-for MODEL in mistral_7b llama3_8b gemma2_9b; do
-    log "  C5 SAE sweep: model=$MODEL"
+    # ─────────────────────────────────────────────────────────────────────────
+    # PHASE 3 (per model) — C5 SAE construction sweep
+    # Separate from C2-C4 so a missing SAE weight file doesn't abort them.
+    # ─────────────────────────────────────────────────────────────────────────
+    log "PHASE 3 — $MODEL: C5 SAE construction sweep"
     $PY scripts/run_model.py \
         --model "$MODEL" \
         --skip_extraction \
@@ -118,7 +83,18 @@ for MODEL in mistral_7b llama3_8b gemma2_9b; do
         --construction_method C5_sae_feature \
         --force_from_step 2 \
         --device "$GPU"
+
 done
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PHASE 4 — Nemenyi + layer rank correlation (after all models complete)
+# --nemenyi_only re-reads the saved AUROC files without re-running model steps.
+# ─────────────────────────────────────────────────────────────────────────────
+
+log "PHASE 4 — Nemenyi significance test + layer rank correlation"
+$PY scripts/run_model.py \
+    --nemenyi_only \
+    --device cpu
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PHASE 5 — External anchor validation (§42) — oracle eval on top-5 strategies
