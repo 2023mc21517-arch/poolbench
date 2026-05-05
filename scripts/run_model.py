@@ -114,9 +114,10 @@ NEMENYI_DIR   = RESULTS_DIR / "nemenyi"
 ICC_DIR       = RESULTS_DIR / "icc"
 CORPUS_DIR    = BASE_DIR / "data" / "corpora"
 ABLATION_DIR  = RESULTS_DIR / "ablation"
-CLASSIFIERS_DIR = RESULTS_DIR / "bert_classifiers"
-SCP_DIR       = RESULTS_DIR / "scp"
-D3_DIR        = RESULTS_DIR / "disentanglement"
+CLASSIFIERS_DIR  = RESULTS_DIR / "bert_classifiers"
+SCP_DIR          = RESULTS_DIR / "scp"
+D3_DIR           = RESULTS_DIR / "disentanglement"
+SAE_INTERP_DIR   = RESULTS_DIR / "sae_interpretability"
 
 LAYER_SELECTION_REPRESENTATIVE_CONCEPTS = [
     "hedging",        # sparse lexical
@@ -844,6 +845,40 @@ def step_prompted_baseline(
 
 # ── Step 7: D3 Disentanglement ───────────────────────────────────────────────
 
+def step_sae_interpretability(
+    model_name: str,
+    best_layer: int,
+    concept_filter: str | None = None,
+    skip_existing: bool = True,
+) -> dict:
+    """
+    Compute SAE interpretability sub-metrics §59–§61:
+      - feature_sparsity (§61)
+      - top5_features     (§60)
+      - cosine_community  (§59)
+    Saves to results/sae_interpretability/{model_name}_sae_interp.json.
+    Silently skipped if SAE weights are unavailable for the model/layer.
+    """
+    from poolbench.evaluation.sae_interpretability import analyse_steering_vectors  # noqa: PLC0415
+
+    concepts = CONCEPT_NAMES if concept_filter is None else [concept_filter]
+    with log_step(log, f"Step 8 SAE-Interp  model={model_name}", device=None):
+        results = analyse_steering_vectors(
+            model_name   = model_name,
+            layer        = best_layer,
+            concepts     = concepts,
+            strategy_ids = RANKED_STRATEGIES,
+            act_dir      = ACT_DIR,
+            out_dir      = SAE_INTERP_DIR,
+            skip_existing = skip_existing,
+        )
+    if results:
+        log.info(f"  Step 8 done — {len(results)} concepts analysed.")
+    else:
+        log.info("  Step 8 skipped (SAE unavailable or all cached).")
+    return results
+
+
 def step_disentanglement(
     model_name: str,
     best_layer: int,
@@ -1048,6 +1083,15 @@ def run_model(model_name: str, args: argparse.Namespace) -> dict:
                 free_gpu_memory(args.device)
                 log.info(f"  [shared model] Released  GPU: {gpu_mem_str(args.device)}")
 
+        # Step 8 — SAE Interpretability (§59–61)
+        if not getattr(args, "skip_sae_interp", False):
+            step_sae_interpretability(
+                model_name    = model_name,
+                best_layer    = best_layer,
+                concept_filter = concept_filter,
+                skip_existing  = not force_step(7),  # re-run when --force_from_step 7
+            )
+
     # Load the best-layer auroc dict for Nemenyi aggregation
     best_layer_path = AUROC_DIR / model_name / "best_layer_auroc.json"
     if best_layer_path.exists():
@@ -1082,6 +1126,8 @@ def main():
                         help="Skip activation extraction (assume already done)")
     parser.add_argument("--skip_scp", action="store_true",
                         help="Skip D2 SCP and D3 disentanglement steps")
+    parser.add_argument("--skip_sae_interp", action="store_true",
+                        help="Skip Step 8 SAE interpretability analysis (§59–61)")
     parser.add_argument("--force_from_step", type=int, choices=range(1, 8), default=None,
                         metavar="{1,2,3,4,5,6,7}",
                         help="Recompute from this pipeline step onward, ignoring checkpoints for those steps")
