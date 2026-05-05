@@ -51,11 +51,16 @@ if [[ "$USE_CURRENT_ENV" == "1" ]]; then
         python -m pip install --upgrade pip setuptools wheel
         python -m pip install --no-cache-dir --force-reinstall \
             --index-url https://download.pytorch.org/whl/cu121 \
-            "torch==2.5.1"
+            "torch==2.5.1" \
+            "torchvision==0.20.1"
         python -m pip install --no-cache-dir --force-reinstall \
             "numpy==1.26.4" \
             "scipy==1.12.0" \
             "scikit-learn==1.4.2"
+        python -m pip install --no-cache-dir --force-reinstall \
+            "transformers==4.46.3" \
+            "tokenizers<0.21" \
+            "huggingface_hub<1.0"
         python -m pip install --no-cache-dir -e .
         python -m pip install --no-cache-dir "accelerate>=0.26.0"
 else
