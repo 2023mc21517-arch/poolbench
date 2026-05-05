@@ -1,15 +1,19 @@
 """
 run_model.py
-Per-model orchestration (full 6-step pipeline):
-  Step 1: Activation extraction
-  Step 2: Pool + AUROC (D1)
-  Step 3: Linearity check
-  Step 4: ICC computation
-  Step 4b: Keyword ablation (seeded concepts only)
-  Step 5: Classifier B training (once per run, all concepts)
-  Step 6: D2 SCP — Steered Concept Prevalence
-  Step 7: D3 Disentanglement
-  Step 8: Nemenyi significance test (after all models)
+Per-model orchestration (full pipeline):
+  Step 1:  Activation extraction
+  Step 2:  Pool + AUROC (D1)          [NOTE: Step 3 linearity pre-check runs BEFORE this in code]
+  Step 3:  Linearity pre-check        [runs before Step 2 per §39 — force_from_step handles correctly]
+  Step 4:  ICC computation
+  Step 4b: Keyword ablation           (seeded concepts only)
+  Step 5:  Classifier B training      (once per experiment, all concepts)
+  Step 6:  D2 SCP — Steered Concept Prevalence
+  Step 6b: Prompted baseline row      (unranked diagnostic)
+  Step 7:  D3 Disentanglement
+  Step 8:  SAE Interpretability       (§59–61; per-model, analysis-only)
+  Step 9:  Nemenyi significance test  (after all models; called from main())
+
+  Layer rank correlation:  runs automatically after main() completes all models.
 
 Usage
 -----
@@ -30,6 +34,10 @@ python run_model.py --model llama3_8b --skip_scp --device cuda:0
 
 # Run linearity checks only (still benefits from GPU for MLP folds)
 python run_model.py --model llama3_8b --linearity_only --device cuda:0
+
+# C2-C5 construction sweep (runs pool+AUROC only; writes to separate subdirs)
+python run_model.py --model llama3_8b --skip_extraction --skip_scp \\
+    --construction_method C2_pca --force_from_step 2
 """
 
 from __future__ import annotations
@@ -462,7 +470,7 @@ def _select_methodology_layer(per_layer_results: dict[int, dict],
     return max(layer_scores, key=layer_scores.get)
 
 
-# ── Step 3: Linearity validation (D3) ────────────────────────────────────────
+# ── Step 3: Linearity pre-check (runs before Step 2 pool sweep per §39) ────────
 
 def step_linearity(model_name: str, best_layer: int,
                    device: str = "cpu",
@@ -574,7 +582,7 @@ def step_icc(model_name: str, construction_method: str = DEFAULT_CONSTRUCTION,
     log.info(f"  Saved → {out_path}")
 
 
-# ── Step 5: Nemenyi strategy significance test ────────────────────────────────
+# ── Step 9 (post-all-models): Nemenyi strategy significance test ─────────────
 
 def step_nemenyi(all_model_auroc_results: dict[str, dict],
                  concept_filter: str | None = None) -> None:
@@ -584,7 +592,7 @@ def step_nemenyi(all_model_auroc_results: dict[str, dict],
 
     all_model_auroc_results: {model_name: {concept_strategy: {auroc: float}}}
     """
-    log.info(f"\n=== Step 8: Nemenyi strategy significance test ===  GPU: {gpu_mem_str()}")
+    log.info(f"\n=== Step 9: Nemenyi strategy significance test ===  GPU: {gpu_mem_str()}")
     NEMENYI_DIR.mkdir(parents=True, exist_ok=True)
 
     concepts = CONCEPT_NAMES if concept_filter is None else [concept_filter]
@@ -1106,7 +1114,7 @@ def run_model(model_name: str, args: argparse.Namespace) -> dict:
                 best_layer     = best_layer,
                 device         = args.device,
                 concept_filter = concept_filter,
-                skip_existing  = not force_step(7),  # re-run when --force_from_step 7
+                skip_existing  = not force_step(8),  # re-run when --force_from_step 8
             )
 
     # Load the best-layer auroc dict for Nemenyi aggregation
@@ -1145,9 +1153,11 @@ def main():
                         help="Skip D2 SCP and D3 disentanglement steps")
     parser.add_argument("--skip_sae_interp", action="store_true",
                         help="Skip Step 8 SAE interpretability analysis (§59–61)")
-    parser.add_argument("--force_from_step", type=int, choices=range(1, 8), default=None,
-                        metavar="{1,2,3,4,5,6,7}",
-                        help="Recompute from this pipeline step onward, ignoring checkpoints for those steps")
+    parser.add_argument("--force_from_step", type=int, choices=range(1, 9), default=None,
+                        metavar="{1..8}",
+                        help="Recompute from this pipeline step onward, ignoring checkpoints "
+                             "(1=extraction, 2=pool/AUROC, 3=linearity, 4=ICC, 5=classifiers, "
+                             "6=SCP, 7=D3, 8=SAE-interp)")
     parser.add_argument("--linearity_only",  action="store_true",
                         help="Only run linearity checks (no extraction)")
     parser.add_argument("--nemenyi_only",    action="store_true",
