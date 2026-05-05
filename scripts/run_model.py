@@ -125,7 +125,8 @@ ICC_DIR       = RESULTS_DIR / "icc"
 CORPUS_DIR    = BASE_DIR / "data" / "corpora"
 ABLATION_DIR  = RESULTS_DIR / "ablation"
 CLASSIFIERS_DIR  = RESULTS_DIR / "bert_classifiers"
-SCP_DIR          = RESULTS_DIR / "scp"
+SCP_DIR              = RESULTS_DIR / "scp"
+STEERED_OUTPUTS_DIR  = RESULTS_DIR / "steered_outputs"
 D3_DIR           = RESULTS_DIR / "disentanglement"
 SAE_INTERP_DIR   = RESULTS_DIR / "sae_interpretability"
 
@@ -845,6 +846,7 @@ def step_scp(
             skip_existing   = skip_existing,
             model           = model,
             tokenizer       = tokenizer,
+            outputs_dir     = STEERED_OUTPUTS_DIR,
         )
 
     log.info(f"  Step 6 done. GPU: {gpu_mem_str(device)}")

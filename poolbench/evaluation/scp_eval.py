@@ -308,6 +308,40 @@ def _mean_token_length(tokenizer, texts: list[str]) -> float:
     return total / len(texts)
 
 
+# ── Steered output storage (§67 camera-ready artifact) ───────────────────────
+
+def _write_output_records(
+    outputs_dir: Path,
+    model_name: str,
+    concept_name: str,
+    strategy_id: str,
+    alpha: float,
+    prompts: list[str],
+    texts: list[str],
+    scores: list[float],
+) -> None:
+    """
+    Append one JSONL record per prompt to:
+        {outputs_dir}/{model_name}/{concept_name}.jsonl
+
+    Each line: {"strategy": ..., "alpha": ..., "prompt": ..., "text": ..., "classifier_score": ...}
+    File is opened in append mode so partial runs accumulate safely.
+    """
+    concept_dir = outputs_dir / model_name
+    concept_dir.mkdir(parents=True, exist_ok=True)
+    out_path = concept_dir / f"{concept_name}.jsonl"
+    with open(out_path, "a", encoding="utf-8") as fh:
+        for prompt, text, score in zip(prompts, texts, scores):
+            record = {
+                "strategy":         strategy_id,
+                "alpha":            alpha,
+                "prompt":           prompt,
+                "text":             text,
+                "classifier_score": round(float(score), 5),
+            }
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
 # ── Per-concept SCP ───────────────────────────────────────────────────────────
 
 def _compute_concept_scp(
@@ -323,6 +357,7 @@ def _compute_concept_scp(
     device: str,
     unigram_probs: dict | None = None,
     concept_probes: dict | None = None,
+    outputs_dir: Path | None = None,
 ) -> dict:
     """
     Compute SCP for all strategies of one concept.
@@ -366,6 +401,8 @@ def _compute_concept_scp(
     if _first_sv is None:
         raise RuntimeError(f"[scp] no steering vectors available for concept={concept_name}")
 
+    _save_outputs = (outputs_dir is not None) and (concept_name not in DISCARD_OUTPUT_CONCEPTS)
+
     log.info(f"      [baseline] Generating unsteered baseline for {concept_name}  GPU: {gpu_mem_str(device)}")
     baseline_texts = _generate_with_steering(
         model, tokenizer, model_name, layer_idx, _first_sv, 0.0, EVAL_PROMPTS, device,
@@ -375,6 +412,12 @@ def _compute_concept_scp(
     baseline_ppl    = _compute_perplexity(model, tokenizer, baseline_texts, device)
     baseline_len    = _mean_token_length(tokenizer, baseline_texts)   # for Phi_c §48
     log.info(f"      [baseline] score={baseline_score:.4f}  ppl={baseline_ppl:.1f}  len={baseline_len:.1f}")
+
+    if _save_outputs:
+        _write_output_records(
+            outputs_dir, model_name, concept_name, "baseline", 0.0,
+            EVAL_PROMPTS, baseline_texts, list(baseline_scores),
+        )
 
     for strat_id in strategy_ids:
         sv = _compute_steering_vector(
@@ -407,6 +450,11 @@ def _compute_concept_scp(
             per_alpha[str(alpha)] = round(delta_c, 5)
             if alpha == 1.0:
                 steered_texts_at_1 = steered_texts
+            if _save_outputs:
+                _write_output_records(
+                    outputs_dir, model_name, concept_name, strat_id, alpha,
+                    EVAL_PROMPTS, steered_texts, list(steered_scores),
+                )
 
         # SCP primary metric at α=1.0
         scp_c = per_alpha.get("1.0", 0.0)
@@ -452,6 +500,7 @@ def compute_scp_for_model(
     skip_existing: bool = True,
     model=None,
     tokenizer=None,
+    outputs_dir: str | Path | None = None,
 ) -> dict:
     """
     Full D2 SCP computation for one model across all (concept × strategy) pairs.
@@ -470,6 +519,7 @@ def compute_scp_for_model(
     out_dir         = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{model_name}_scp.json"
+    _outputs_dir: Path | None = Path(outputs_dir) if outputs_dir is not None else None
 
     if skip_existing and out_path.exists():
         with open(out_path) as f:
@@ -519,9 +569,10 @@ def compute_scp_for_model(
             concept_results = _compute_concept_scp(
                 model, tokenizer, model_name, best_layer,
                 concept_name, strategy_ids, act_dir,
-                                clf, clf_tok, device,
-                                unigram_probs=unigram_probs,
-                                concept_probes=concept_probes,
+                clf, clf_tok, device,
+                unigram_probs=unigram_probs,
+                concept_probes=concept_probes,
+                outputs_dir=_outputs_dir,
             )
 
         all_results[concept_name] = concept_results
