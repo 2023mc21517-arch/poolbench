@@ -44,12 +44,7 @@ ZERO_SHOT_MODEL_ID = os.environ.get(
 _CLAUDE_BATCH_SIZE: int = int(os.environ.get("POOLBENCH_CLAUDE_BATCH_SIZE", "20"))
 
 # ── Concepts handled by zero-shot LLM (§52) ──────────────────────────────────
-LLM_SCORED_CONCEPTS: set[str] = {
-    "bureaucratic",
-    "deference",
-    "planning",
-    "legal_formality",
-}
+LLM_SCORED_CONCEPTS: set[str] = set()  # all 17 concepts now have BERT Classifier B anchors
 
 
 def _classifier_artifact_complete(save_dir: Path) -> bool:
@@ -180,6 +175,42 @@ ANCHOR_CONFIGS: dict[str, dict] = {
         "text_col":  "docstring",
         "label_col": None,
         "_custom_loader": "code_docs",
+    },
+    "bureaucratic": {
+        "hf_id":     "ccdv/govreport-summarization",
+        "config":    None,
+        "split":     "train",
+        "text_col":  "report",
+        "label_col": None,
+        "pos_values": [],
+        "_custom_loader": "bureaucratic",
+    },
+    "deference": {
+        "hf_id":     "Intel/polite-guard",
+        "config":    None,
+        "split":     "train",
+        "text_col":  "text",
+        "label_col": "label",
+        "pos_values": ["polite", "somewhat polite"],
+        "_neg_values": ["neutral", "impolite"],
+    },
+    "legal_formality": {
+        "hf_id":     "lex_glue",
+        "config":    "scotus",
+        "split":     "train",
+        "text_col":  "text",
+        "label_col": None,
+        "pos_values": [],
+        "_custom_loader": "legal_formality",
+    },
+    "planning": {
+        "hf_id":     "tasksource/bigbench",
+        "config":    "goal_step_wikihow",
+        "split":     "train",
+        "text_col":  "inputs",
+        "label_col": None,
+        "pos_values": [],
+        "_custom_loader": "planning",
     },
 }
 
@@ -461,6 +492,110 @@ def _custom_load(concept: str, cfg: dict,
             texts  = pos_texts[:max_per_class] + neg_texts[:max_per_class]
             labels = [1] * min(len(pos_texts), max_per_class) + [0] * min(len(neg_texts), max_per_class)
             log.info(f"  [classifier_b] causation anchor (task391): pos={len(pos_texts)} neg={len(neg_texts)}")
+            return texts, labels
+
+        elif concept == "bureaucratic":
+            # ccdv/govreport-summarization: report field = government/bureaucratic prose (positive)
+            # Use the summary field truncated to ~400 chars as informal contrasting negative is
+            # not available here — instead pull DailyDialog turns as informal negatives.
+            import re as _re  # noqa: PLC0415
+            ds = load_dataset(cfg["hf_id"], cfg.get("config"),
+                              split=cfg["split"], streaming=True)
+            pos_texts = []
+            for row in ds:
+                text = str(row.get("report", "")).strip()
+                # Take first 500 chars of each report section
+                text = text[:500].strip()
+                if len(text) >= 80:
+                    pos_texts.append(text)
+                if len(pos_texts) >= max_per_class:
+                    break
+            neg_texts = []
+            try:
+                dial_ds = load_dataset("daily_dialog", split="train", streaming=True)
+                for row in dial_ds:
+                    for turn in (row.get("dialog") or []):
+                        turn = str(turn).strip()
+                        if len(turn) >= 30:
+                            neg_texts.append(turn)
+                        if len(neg_texts) >= max_per_class:
+                            break
+                    if len(neg_texts) >= max_per_class:
+                        break
+            except Exception as exc:
+                raise RuntimeError("bureaucratic: could not load daily_dialog negatives") from exc
+            if len(pos_texts) < 50 or len(neg_texts) < 50:
+                raise RuntimeError(f"bureaucratic anchor too small: pos={len(pos_texts)} neg={len(neg_texts)}")
+            texts  = pos_texts[:max_per_class] + neg_texts[:max_per_class]
+            labels = [1] * min(len(pos_texts), max_per_class) + [0] * min(len(neg_texts), max_per_class)
+            log.info(f"  [classifier_b] bureaucratic anchor (govreport/daily_dialog): pos={len(pos_texts)} neg={len(neg_texts)}")
+            return texts, labels
+
+        elif concept == "legal_formality":
+            # lex_glue scotus: Supreme Court opinions = legal-formal (positive)
+            # Use Yelp reviews (1-star) as informal negative
+            ds = load_dataset(cfg["hf_id"], cfg.get("config"),
+                              split=cfg["split"], streaming=True)
+            pos_texts = []
+            for row in ds:
+                text = str(row.get("text", "")).strip()
+                text = text[:500].strip()
+                if len(text) >= 80:
+                    pos_texts.append(text)
+                if len(pos_texts) >= max_per_class:
+                    break
+            neg_texts = []
+            try:
+                yelp_ds = load_dataset("Yelp/yelp_review_full", split="train", streaming=True)
+                for row in yelp_ds:
+                    if str(row.get("label", "")) == "0":   # 1-star = most informal/negative
+                        text = str(row.get("text", "")).strip()[:400]
+                        if len(text) >= 50:
+                            neg_texts.append(text)
+                    if len(neg_texts) >= max_per_class:
+                        break
+            except Exception as exc:
+                raise RuntimeError("legal_formality: could not load Yelp negatives") from exc
+            if len(pos_texts) < 50 or len(neg_texts) < 50:
+                raise RuntimeError(f"legal_formality anchor too small: pos={len(pos_texts)} neg={len(neg_texts)}")
+            texts  = pos_texts[:max_per_class] + neg_texts[:max_per_class]
+            labels = [1] * min(len(pos_texts), max_per_class) + [0] * min(len(neg_texts), max_per_class)
+            log.info(f"  [classifier_b] legal_formality anchor (scotus/yelp): pos={len(pos_texts)} neg={len(neg_texts)}")
+            return texts, labels
+
+        elif concept == "planning":
+            # tasksource/bigbench goal_step_wikihow:
+            #   inputs = "Q: The most reasonable goal of '<step>' is\n  choice: ...\n..."
+            #   targets = [correct goal title]
+            # Positive: extract <step> text — it is a genuine planning step toward a stated goal
+            # Negative: extract one of the distractor (wrong) goal titles as a non-planning label
+            import re as _re  # noqa: PLC0415
+            _step_pat = _re.compile(r"The most reasonable goal of '(.+?)' is", _re.DOTALL)
+            ds = load_dataset(cfg["hf_id"], cfg.get("config"),
+                              split=cfg["split"], streaming=True)
+            pos_texts, neg_texts = [], []
+            for row in ds:
+                m = _step_pat.search(row.get("inputs", ""))
+                if not m:
+                    continue
+                step_text = m.group(1).strip()
+                correct_goal = (row.get("targets") or [""])[0].strip()
+                # Distractors = choices that are NOT the correct goal
+                distractors = [c for c in (row.get("multiple_choice_targets") or [])
+                               if c != correct_goal]
+                if step_text and len(step_text) >= 10:
+                    # positive = "<step> → <correct goal>"  gives planning context
+                    pos_texts.append(f"{step_text} Goal: {correct_goal}")
+                if distractors:
+                    # negative = just the distractor goal title alone (no step context = no planning)
+                    neg_texts.append(distractors[0])
+                if len(pos_texts) >= max_per_class and len(neg_texts) >= max_per_class:
+                    break
+            if len(pos_texts) < 50 or len(neg_texts) < 50:
+                raise RuntimeError(f"planning anchor too small: pos={len(pos_texts)} neg={len(neg_texts)}")
+            texts  = pos_texts[:max_per_class] + neg_texts[:max_per_class]
+            labels = [1] * min(len(pos_texts), max_per_class) + [0] * min(len(neg_texts), max_per_class)
+            log.info(f"  [classifier_b] planning anchor (bigbench goal_step_wikihow): pos={len(pos_texts)} neg={len(neg_texts)}")
             return texts, labels
 
     except Exception as exc:
