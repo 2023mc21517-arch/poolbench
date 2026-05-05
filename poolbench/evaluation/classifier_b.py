@@ -75,12 +75,13 @@ ANCHOR_CONFIGS: dict[str, dict] = {
         "pos_values": [1, "positive", "POSITIVE"],
     },
     "hedging": {
-        "hf_id":     "ltg/hedge_eval",
-        "config":    None,
+        "hf_id":     "qiaojin/PubMedQA",
+        "config":    "pqa_labeled",
         "split":     "train",
-        "text_col":  "sentence",
-        "label_col": "label",
-        "pos_values": [1, "hedge", "HEDGE"],
+        "text_col":  "long_answer",
+        "label_col": "final_decision",
+        "pos_values": [],
+        "_custom_loader": "hedging",
     },
     "contrast": {
         "hf_id":     "cestwc/conj_nli",
@@ -109,12 +110,13 @@ ANCHOR_CONFIGS: dict[str, dict] = {
         "_threshold": 0.5,
     },
     "causation": {
-        "hf_id":     "causal_timebank",
+        "hf_id":     "Lots-of-LoRAs/task391_causal_relationship",
         "config":    None,
         "split":     "train",
-        "text_col":  "text",
-        "label_col": "label",
-        "pos_values": [1, "causal", "CAUSAL"],
+        "text_col":  "input",
+        "label_col": "output",
+        "pos_values": [],
+        "_custom_loader": "causation",
     },
     "conditionality": {
         "hf_id":     "cestwc/conj_nli",
@@ -344,8 +346,60 @@ def _custom_load(concept: str, cfg: dict,
             log.info(f"  [classifier_b] code_docs anchor: pos={len(pos_texts)} neg={len(neg_texts)}")
             return texts, labels
 
-    except Exception as exc:
-        raise RuntimeError(f"Custom loader error for '{concept}': {exc}") from exc
+        elif concept == "hedging":
+            # PubMedQA pqa_labeled: long_answer = biomedical conclusion sentence
+            # final_decision = "maybe" → hedged/uncertain (positive)
+            #                  "yes"   → definitive assertive (negative)
+            ds = load_dataset(cfg["hf_id"], cfg.get("config"),
+                              split=cfg["split"])
+            pos_texts, neg_texts = [], []
+            for row in ds:
+                text     = str(row.get("long_answer", "")).strip()
+                decision = str(row.get("final_decision", "")).lower().strip()
+                if not text:
+                    continue
+                if decision == "maybe":
+                    pos_texts.append(text)
+                elif decision == "yes":
+                    neg_texts.append(text)
+                if len(pos_texts) >= max_per_class and len(neg_texts) >= max_per_class:
+                    break
+            if len(pos_texts) < 30 or len(neg_texts) < 30:
+                raise RuntimeError(f"hedging anchor too small: pos={len(pos_texts)} neg={len(neg_texts)}")
+            texts  = pos_texts[:max_per_class] + neg_texts[:max_per_class]
+            labels = [1] * min(len(pos_texts), max_per_class) + [0] * min(len(neg_texts), max_per_class)
+            log.info(f"  [classifier_b] hedging anchor (PubMedQA maybe/yes): pos={len(pos_texts)} neg={len(neg_texts)}")
+            return texts, labels
+
+        elif concept == "causation":
+            # task391: instruction-tuning format; extract the test sentence pair
+            # from the prompt and use output[0] = "plausible"/"not plausible"
+            import re as _re  # noqa: PLC0415
+            ds = load_dataset(cfg["hf_id"], cfg.get("config"),
+                              split=cfg["split"])
+            pos_texts, neg_texts = [], []
+            pattern = _re.compile(
+                r"Now complete the following example\s*-?\s*\nInput:\s*(.*?)\nOutput:",
+                _re.DOTALL,
+            )
+            for row in ds:
+                m = pattern.search(row.get("input", ""))
+                if not m:
+                    continue
+                text  = m.group(1).strip()
+                lbl   = (row.get("output") or [""])[0].strip().lower()
+                if lbl == "plausible":
+                    pos_texts.append(text)
+                elif lbl == "not plausible":
+                    neg_texts.append(text)
+                if len(pos_texts) >= max_per_class and len(neg_texts) >= max_per_class:
+                    break
+            if len(pos_texts) < 50 or len(neg_texts) < 50:
+                raise RuntimeError(f"causation anchor too small: pos={len(pos_texts)} neg={len(neg_texts)}")
+            texts  = pos_texts[:max_per_class] + neg_texts[:max_per_class]
+            labels = [1] * min(len(pos_texts), max_per_class) + [0] * min(len(neg_texts), max_per_class)
+            log.info(f"  [classifier_b] causation anchor (task391): pos={len(pos_texts)} neg={len(neg_texts)}")
+            return texts, labels
 
     raise RuntimeError(f"No custom loader branch implemented for '{concept}'")
 
