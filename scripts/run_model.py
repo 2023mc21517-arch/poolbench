@@ -261,16 +261,30 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
     For each candidate layer, apply all 19 ranked strategies + compute AUROC.
     Select best layer per strategy (modal layer selection across all concepts).
 
+    C1 (DiffMean, default) is the primary leaderboard run and writes to:
+        results/auroc/{model}/layer_{L}/{model}_auroc_results.json
+        results/auroc/{model}/best_layer_auroc.json
+
+    C2-C5 construction-sweep runs are isolated under a per-method subdirectory:
+        results/auroc/{model}/{construction_method}/layer_{L}/{model}_auroc_results.json
+        results/auroc/{model}/{construction_method}/best_layer_auroc.json
+    so they never overwrite the C1 primary results.
+
     Returns consolidated auroc_results dict:
         {"best_layer": int, "per_layer": {layer: auroc_results_dict}}
     """
     cfg = MODEL_CONFIGS[model_name]
-    log.info(f"\n=== Step 2: Pool + AUROC — {model_name} ===  GPU: {gpu_mem_str()}")
+    log.info(f"\n=== Step 2: Pool + AUROC — {model_name} ({construction_method}) ===  GPU: {gpu_mem_str()}")
     concepts_to_run = {k: v for k, v in CONCEPTS.items()
                        if concept_filter is None or k == concept_filter}
     expected_keys = [f"{concept}_{strategy}" for concept in concepts_to_run for strategy in RANKED_STRATEGIES]
 
-    primary_out = AUROC_DIR / model_name / "best_layer_auroc.json"
+    # C1 writes directly under AUROC_DIR/{model}.  C2-C5 write under a sub-folder
+    # named after the construction method so C1 checkpoints are never touched.
+    _is_primary = (construction_method == DEFAULT_CONSTRUCTION)
+    _auroc_model_dir = AUROC_DIR / model_name if _is_primary else AUROC_DIR / model_name / construction_method
+
+    primary_out = _auroc_model_dir / "best_layer_auroc.json"
     existing_summary = _safe_load_json(primary_out) if skip_existing else None
     if existing_summary is not None:
         if existing_summary.get("layer_selection_method") != "methodology_representative_mean":
@@ -297,9 +311,9 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
 
     for layer_idx in cfg["candidate_layers"]:
         log.info(f"\n  Layer {layer_idx}  GPU: {gpu_mem_str()}")
-        layer_act_dir = ACT_DIR / model_name / f"layer_{layer_idx}"
-        layer_auroc_dir = AUROC_DIR / model_name / f"layer_{layer_idx}"
-        layer_out_path = layer_auroc_dir / f"{model_name}_auroc_results.json"
+        layer_act_dir   = ACT_DIR / model_name / f"layer_{layer_idx}"
+        layer_auroc_dir = _auroc_model_dir / f"layer_{layer_idx}"
+        layer_out_path  = layer_auroc_dir / f"{model_name}_auroc_results.json"
 
         existing_layer = _safe_load_json(layer_out_path) if skip_existing else None
         if existing_layer is not None:
@@ -366,7 +380,7 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
         log.info(f"  [checkpoint] Layer {layer_idx} saved → {layer_out_path}")
         per_layer_results[layer_idx] = auroc_res
 
-    fallback_out = AUROC_DIR / model_name / "fallback_rates.json"
+    fallback_out = _auroc_model_dir / "fallback_rates.json"
     fallback_total = max(fallback_accumulator.get("total", 0), 1)
     fallback_rates = {
         s: count / fallback_total for s, count in fallback_accumulator.get("counts", {}).items()
@@ -848,6 +862,7 @@ def step_prompted_baseline(
 def step_sae_interpretability(
     model_name: str,
     best_layer: int,
+    device: str = "cpu",
     concept_filter: str | None = None,
     skip_existing: bool = True,
 ) -> dict:
@@ -858,11 +873,12 @@ def step_sae_interpretability(
       - cosine_community  (§59)
     Saves to results/sae_interpretability/{model_name}_sae_interp.json.
     Silently skipped if SAE weights are unavailable for the model/layer.
+    SAE runs on CPU — device is only used for log_step GPU reporting.
     """
     from poolbench.evaluation.sae_interpretability import analyse_steering_vectors  # noqa: PLC0415
 
     concepts = CONCEPT_NAMES if concept_filter is None else [concept_filter]
-    with log_step(log, f"Step 8 SAE-Interp  model={model_name}", device=None):
+    with log_step(log, f"Step 8 SAE-Interp  model={model_name}", device):
         results = analyse_steering_vectors(
             model_name   = model_name,
             layer        = best_layer,
@@ -1086,8 +1102,9 @@ def run_model(model_name: str, args: argparse.Namespace) -> dict:
         # Step 8 — SAE Interpretability (§59–61)
         if not getattr(args, "skip_sae_interp", False):
             step_sae_interpretability(
-                model_name    = model_name,
-                best_layer    = best_layer,
+                model_name     = model_name,
+                best_layer     = best_layer,
+                device         = args.device,
                 concept_filter = concept_filter,
                 skip_existing  = not force_step(7),  # re-run when --force_from_step 7
             )
