@@ -195,7 +195,13 @@ def _compute_steering_vector(
     sv = pos_vecs.mean(0) - neg_vecs.mean(0)
     norm = np.linalg.norm(sv)
     if norm < 1e-9:
-        raise RuntimeError(f"[scp] zero-norm steering vector for {concept_name}/{strategy_id}")
+        # P2_first_token (and similar position-anchored strategies) can produce a
+        # zero-norm vector when all passages share the same token at the target
+        # position (e.g. BOS for causal LMs with left-padding).  This is a valid
+        # outcome — the strategy has no usable direction for this concept.
+        # Return None so the caller can record a null result and continue.
+        log.warning(f"  [scp] zero-norm steering vector for {concept_name}/{strategy_id} — skipping")
+        return None
     return (sv / norm).astype(np.float32)
 
 
@@ -380,7 +386,12 @@ def _compute_concept_scp(
             neg_acts=_neg_acts,
         )
         if sv is None:
-            raise RuntimeError(f"[scp] no steering vector for {concept_name}/{strat_id}")
+            log.warning(f"      [scp] {concept_name}/{strat_id}: zero-norm — recording null result")
+            results[strat_id] = {
+                "SCP_c": None, "phi_c": None, "M_c": None,
+                "per_alpha": {}, "zero_norm": True,
+            }
+            continue
 
         log.info(f"      strategy {strat_id}  GPU: {gpu_mem_str(device)}")
 
