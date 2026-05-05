@@ -1,9 +1,9 @@
 """
 run_model.py
-Per-model orchestration (full pipeline):
+Per-model orchestration (full pipeline — ONE invocation per model, never revisited):
   Step 1:  Activation extraction
-  Step 2:  Pool + AUROC (D1)          [NOTE: Step 3 linearity pre-check runs BEFORE this in code]
-  Step 3:  Linearity pre-check        [runs before Step 2 per §39 — force_from_step handles correctly]
+  Step 3:  Linearity pre-check        [runs before Step 2 per §39]
+  Step 2:  Pool + AUROC (D1, C1 DiffMean) — all 19 strategies × all candidate layers
   Step 4:  ICC computation
   Step 4b: Keyword ablation           (seeded concepts only)
   Step 5:  Classifier B training      (once per experiment, all concepts)
@@ -11,6 +11,8 @@ Per-model orchestration (full pipeline):
   Step 6b: Prompted baseline row      (unranked diagnostic)
   Step 7:  D3 Disentanglement
   Step 8:  SAE Interpretability       (§59–61; per-model, analysis-only)
+  C2–C5:   Construction sweep         (pool+AUROC only; runs inside run_model() after Step 8
+                                       so the model is fully processed in a single pass)
   Step 9:  Nemenyi significance test  (after all models; called from main())
 
   Layer rank correlation:  runs automatically after main() completes all models.
@@ -1146,6 +1148,23 @@ def run_model(model_name: str, args: argparse.Namespace) -> dict:
                 device         = args.device,
                 concept_filter = concept_filter,
                 skip_existing  = not force_step(8),  # re-run when --force_from_step 8
+            )
+
+    # ── Construction method sweep (Appendix E §35) ─────────────────────────
+    # C2/C3/C4/C5 AUROC-only runs happen here so the model is fully processed
+    # in a single pass and never needs to be revisited.
+    # Skipped when this invocation is already a non-C1 sweep (avoids recursion)
+    # or when running in linearity-only mode.
+    _current_method = getattr(args, "construction_method", DEFAULT_CONSTRUCTION)
+    if _current_method == DEFAULT_CONSTRUCTION and not args.linearity_only:
+        for _sweep_method in ["C2_pca", "C3_logreg", "C4_repe", "C5_sae_feature"]:
+            log.info(f"\n  [construction sweep] {_sweep_method} — pool+AUROC only (Appendix E §35)")
+            step_pool_and_auroc(
+                model_name          = model_name,
+                construction_method = _sweep_method,
+                concept_filter      = concept_filter,
+                skip_existing       = not force_step(2),
+                device              = args.device,
             )
 
     # Load the best-layer auroc dict for Nemenyi aggregation
