@@ -494,58 +494,62 @@ def build_iti_concept_probes(act_dir, concepts: dict,
                              device: str = "cpu") -> dict:
     """Build lightweight supervised ITI head-score probes from train activations.
 
-    All heads for a concept are trained simultaneously in one batched GPU pass
-    using a PyTorch logistic regression (LBFGS).  This replaces 1,632 sequential
-    sklearn fits with 3 batched GPU forward/backward passes per concept.
+    All heads for a concept are trained simultaneously in one batched GPU pass.
+    Feature matrices are built in a single pass over samples (not 32 passes),
+    then stacked to (H, N, D) for batched GPU logistic regression.
     """
+    import time
     import torch
     import torch.nn.functional as F
     from sklearn.model_selection import StratifiedKFold
     from sklearn.metrics import roc_auc_score
+    import logging
+    _log = logging.getLogger(__name__)
 
     act_dir = Path(act_dir)
     probes = {}
-    for concept_name in concepts:
+    n_concepts = len(concepts)
+    for ci, concept_name in enumerate(concepts, 1):
+        t0 = time.time()
         pos_path = act_dir / f"{concept_name}_{partition}_pos.npy"
         neg_path = act_dir / f"{concept_name}_{partition}_neg.npy"
         if not pos_path.exists() or not neg_path.exists():
+            _log.info(f"  [ITI probe {ci}/{n_concepts}] {concept_name}: missing activation files — skip")
             continue
         pos_acts = np.load(pos_path, allow_pickle=True)
         neg_acts = np.load(neg_path, allow_pickle=True)
-        sample = next((x for x in list(pos_acts) + list(neg_acts) if x.get("attn_weights") is not None), None)
+        all_acts = list(pos_acts) + list(neg_acts)
+        sample = next((x for x in all_acts if x.get("attn_weights") is not None), None)
         if sample is None:
+            _log.info(f"  [ITI probe {ci}/{n_concepts}] {concept_name}: no attn_weights — skip")
             continue
         sample_inflow = _attention_inflow_per_head(sample["attn_weights"])
         if sample_inflow is None:
+            _log.info(f"  [ITI probe {ci}/{n_concepts}] {concept_name}: bad attn shape — skip")
             continue
         n_heads = sample_inflow.shape[0]
         y = np.array([1] * len(pos_acts) + [0] * len(neg_acts), dtype=np.float32)
-        all_acts = list(pos_acts) + list(neg_acts)
 
-        # Build all head feature matrices: list of (N, D) arrays, one per head
-        head_feats: list[np.ndarray] = []
-        for head_idx in range(n_heads):
-            feats = []
-            for item in all_acts:
-                h = item["hidden"]
-                attn = item.get("attn_weights")
-                if attn is None:
-                    feats.append(pool_mean(h))
-                    continue
-                inflows = _attention_inflow_per_head(attn)
-                if inflows is None:
-                    feats.append(pool_mean(h))
-                    continue
-                inflow = inflows[head_idx]
-                inflow = inflow / (inflow.sum() + 1e-9)
-                feats.append((inflow[:, None] * h).sum(axis=0))
-            X = np.stack(feats).astype(np.float32)
-            X /= np.linalg.norm(X, axis=1, keepdims=True) + 1e-9
-            head_feats.append(X)
+        # Single pass over samples — compute (H, D) feature vec per sample at once.
+        # Previously looped n_heads times over all_acts → 32× redundant attn parsing.
+        all_feats: list[np.ndarray] = []  # each entry: (H, D)
+        for item in all_acts:
+            h = np.asarray(item["hidden"], dtype=np.float32)
+            attn = item.get("attn_weights")
+            inflows = _attention_inflow_per_head(attn)  # (H, S) or None
+            if inflows is None:
+                mean_vec = h.mean(axis=0)               # (D,)
+                feat = np.tile(mean_vec, (n_heads, 1))  # (H, D)
+            else:
+                inflow_norm = inflows / (inflows.sum(axis=1, keepdims=True) + 1e-9)  # (H, S)
+                feat = inflow_norm @ h                  # (H, S) @ (S, D) = (H, D)
+            feat = feat / (np.linalg.norm(feat, axis=1, keepdims=True) + 1e-9)
+            all_feats.append(feat)
 
-        # Stack into (H, N, D) for batched GPU training
-        X_all = np.stack(head_feats, axis=0)  # (H, N, D)
+        # (N, H, D) → (H, N, D)
+        X_all = np.stack(all_feats, axis=0).transpose(1, 0, 2).astype(np.float32)
         H, N, D = X_all.shape
+        t_feat = time.time() - t0
 
         kf = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
         fold_aurocs = np.zeros((H, 3), dtype=np.float32)
@@ -556,15 +560,13 @@ def build_iti_concept_probes(act_dir, concepts: dict,
             Xte = torch.from_numpy(X_all[:, te_idx, :]).to(device)   # (H, N_te, D)
             yte = y[te_idx]                                            # numpy for auroc
 
-            # Batched logistic regression: w (H, D), b (H,)
             w = torch.zeros(H, D, device=device, requires_grad=True)
             b = torch.zeros(H, device=device, requires_grad=True)
             opt = torch.optim.Adam([w, b], lr=0.05)
 
             for _ in range(300):
                 opt.zero_grad()
-                # logits: (H, N_tr)
-                logits = torch.bmm(Xtr, w.unsqueeze(2)).squeeze(2) + b.unsqueeze(1)
+                logits = torch.bmm(Xtr, w.unsqueeze(2)).squeeze(2) + b.unsqueeze(1)  # (H, N_tr)
                 loss = F.binary_cross_entropy_with_logits(
                     logits,
                     ytr.unsqueeze(0).expand(H, -1),
@@ -573,7 +575,7 @@ def build_iti_concept_probes(act_dir, concepts: dict,
                 opt.step()
 
             with torch.no_grad():
-                scores = (torch.bmm(Xte, w.unsqueeze(2)).squeeze(2) + b.unsqueeze(1)).cpu().numpy()  # (H, N_te)
+                scores = (torch.bmm(Xte, w.unsqueeze(2)).squeeze(2) + b.unsqueeze(1)).cpu().numpy()
 
             for h_i in range(H):
                 if len(np.unique(yte)) >= 2:
@@ -582,8 +584,11 @@ def build_iti_concept_probes(act_dir, concepts: dict,
                     fold_aurocs[h_i, fold_i] = 0.5
 
         head_scores = fold_aurocs.mean(axis=1).astype(np.float32)
+        best_auroc = float(head_scores.max())
+        elapsed = time.time() - t0
+        _log.info(f"  [ITI probe {ci}/{n_concepts}] {concept_name}: N={N} H={H} D={D} "
+                  f"feat={t_feat:.1f}s  total={elapsed:.1f}s  best_head_auroc={best_auroc:.3f}")
         probes[concept_name] = SimpleNamespace(head_scores=head_scores)
-    return probes
     return probes
 
 def compute_all_pooling_strategies(act_dir, concepts: dict,

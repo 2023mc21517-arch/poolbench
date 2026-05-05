@@ -304,7 +304,9 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
         # Build pooled_results: {concept_strategy: {pos_pooled, neg_pooled}}
         train_pooled_results: dict = {}
         test_pooled_results: dict = {}
-        for concept_name in concepts_to_run:
+        n_concepts_to_run = len(concepts_to_run)
+        for concept_i, concept_name in enumerate(concepts_to_run, 1):
+            log.info(f"  [pool] L{layer_idx} concept {concept_i}/{n_concepts_to_run}: {concept_name}")
             # Verify files exist without loading them (compute_all_pooling_strategies reloads from disk)
             for _part in ("train", "test"):
                 for _split in ("pos", "neg"):
