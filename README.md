@@ -1,6 +1,6 @@
 # PoolBench
 
-**PoolBench** is a diagnostic benchmark that systematically evaluates 19 pooling strategies across 7 large language models and 17 semantic concepts, measuring how well each strategy captures concept-level information in hidden representations.
+**PoolBench** is a diagnostic benchmark that systematically evaluates 19 pooling strategies across 3 large language models and 17 semantic concepts, measuring how well each strategy captures concept-level information in hidden representations.
 
 ---
 
@@ -10,8 +10,8 @@ Every embedding pipeline makes an implicit choice: which token(s) to pool when c
 
 - **19 ranked pooling strategies** spanning position-anchored, uniform aggregation, window, saliency-weighted, and structural-linguistic families (18 unsupervised + 1 supervised)
 - **17 semantic concepts** (hedging, causation, sentiment, toxicity, legal formality, math certainty, and 12 more) with controlled positive/negative corpora
-- **3 evaluation metrics**: D1 AUROC (concept separability), D2 SCP (structural consistency probe), D3 Disentanglement
-- **7 models**: Llama-3.1 8B, Gemma-2 9B, Mistral 7B, Qwen-2.5 7B, FLAN-T5 XL, Mamba2 2.7B, BERT-base
+- **3 evaluation metrics**: D1 AUROC (concept separability), D2 SCP (steered concept prevalence), D3 Disentanglement
+- **3 models**: Llama-3.1 8B, Gemma-2 9B, Mistral 7B
 
 ---
 
@@ -26,7 +26,7 @@ poolbench/
 │   ├── extract_activations.py       # GPU activation extraction (hook-based)
 │   │
 │   ├── data/                        # Subpackage: corpus metadata
-│   │   ├── concepts.py              # 18 concept definitions
+│   │   ├── concepts.py              # 17 concept definitions
 │   │   ├── filters.py               # Per-concept text / label filters
 │   │   └── rewriters.py             # Rule-based positive→negative rewriters
 │   │
@@ -148,10 +148,6 @@ python scripts/run_model.py --nemenyi_only
 | Llama-3.1 8B | 16 GB |
 | Gemma-2 9B | 20 GB |
 | Mistral 7B | 16 GB |
-| Qwen-2.5 7B | 16 GB |
-| FLAN-T5 XL | 8 GB |
-| Mamba2 2.7B | 8 GB |
-| BERT-base | 2 GB |
 
 ---
 
@@ -200,7 +196,7 @@ S = supervised (requires labeled corpus at pooling time); U = unsupervised.
 | `academic_tone` | gfissore/arxiv-abstracts-2021 | sentence-transformers/reddit | Domain filter |
 | `code_docs` | Nan-Do/code-search-net-python | sentence-transformers/reddit | Domain filter |
 | `bureaucratic` | FiscalNote/billsum | Yelp/yelp\_review\_full | Domain filter |
-| `uncertainty` | gfissore/arxiv-abstracts-2021 | gfissore/arxiv-abstracts-2021 | Lexical filter |
+| `narrative` | euclaise/writingprompts | wikimedia/wikipedia 20231101.en | Domain filter |
 | `deference` | Intel/polite-guard | `Intel/polite-guard` | Label filter (`polite` + `somewhat polite` vs. `neutral` + `impolite`) |
 | `planning` | gursi26/wikihow-cleaned + sentence-transformers/reddit + Yelp/yelp_review_full | gursi26/wikihow-cleaned + sentence-transformers/reddit + Yelp/yelp_review_full | Text/source filter |
 | `negation_density` | gfissore/arxiv-abstracts-2021 | gfissore/arxiv-abstracts-2021 | Lexical filter |
@@ -246,7 +242,7 @@ bash scripts/reproduce.sh
 # Or step by step:
 python scripts/dataset_builder.py --all
 python scripts/power_analysis.py
-for model in llama3_8b gemma2_9b mistral_7b qwen25_7b flan_t5_xl mamba2_2b7 bert_base_uncased; do
+for model in llama3_8b gemma2_9b mistral_7b; do
     python scripts/run_model.py --model $model --device cuda:0
 done
 python scripts/run_model.py --nemenyi_only
