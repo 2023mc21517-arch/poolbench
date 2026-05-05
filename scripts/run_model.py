@@ -833,6 +833,7 @@ def step_scp(
     cfg      = MODEL_CONFIGS[model_name]
 
     with log_step(log, f"Step 6 SCP  model={model_name}", device):
+        log.info(f"  [scp] D1 selected layer: {best_layer}  (model={model_name})")
         scp_results = compute_scp_for_model(
             model_name      = model_name,
             hf_id           = cfg["hf_id"],

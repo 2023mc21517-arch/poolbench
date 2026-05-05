@@ -87,19 +87,39 @@ class _SteeringHook:
     """
     Forward hook that adds alpha * steering_vector to the layer's hidden states.
     This implements residual-stream injection for causal LMs.
+
+    Supports per-row alpha values: pass a 1-D tensor of shape (batch,) as
+    `alpha` to apply a different strength to each sequence in the batch.
+    This allows all 12 SCP alpha levels to be evaluated in one generate() call.
     """
 
-    def __init__(self, steering_vector: np.ndarray, alpha: float, device: str):
+    def __init__(self, steering_vector: np.ndarray, alpha, device: str):
         import torch as _t  # noqa: PLC0415
         self._sv     = _t.tensor(steering_vector, dtype=_t.bfloat16).to(device)
-        self._alpha  = alpha
+        # alpha can be a scalar float or a 1-D tensor (batch,)
+        if isinstance(alpha, _t.Tensor):
+            self._alpha = alpha.to(device)          # (batch,)
+            self._per_row = True
+        else:
+            self._alpha   = float(alpha)
+            self._per_row = False
         self._handle = None
 
     def hook_fn(self, module, input, output):
+        import torch as _t  # noqa: PLC0415
+        h = output[0] if isinstance(output, tuple) else output
+        if self._per_row:
+            # self._alpha: (batch,)  self._sv: (d_model,)
+            # Need to broadcast: (batch, 1) * (d_model,) → (batch, seq, d_model)
+            batch = h.shape[0]
+            alpha_bc = self._alpha[:batch].to(h.dtype).view(batch, 1, 1)
+            sv_bc    = self._sv.to(h.dtype).unsqueeze(0).unsqueeze(0)  # (1,1,d)
+            h_new = h + alpha_bc * sv_bc
+        else:
+            h_new = h + self._alpha * self._sv.to(h.dtype)
         if isinstance(output, tuple):
-            h = output[0] + self._alpha * self._sv
-            return (h,) + output[1:]
-        return output + self._alpha * self._sv
+            return (h_new,) + output[1:]
+        return h_new
 
     def register(self, layer_module):
         self._handle = layer_module.register_forward_hook(self.hook_fn)
@@ -213,33 +233,43 @@ def _generate_with_steering(
     model_name: str,
     layer_idx: int,
     steering_vector: np.ndarray,
-    alpha: float,
+    alpha,                          # float  OR  list[float] for multi-alpha batch
     prompts: list[str],
     device: str,
     max_new_tokens: int = MAX_NEW_TOKENS,
-) -> list[str]:
+) -> "list[str] | dict[float, list[str]]":
     """
     Generate one completion per prompt with the steering vector injected.
-    All prompts are batched into a single model.generate call for GPU efficiency.
-    Returns list of generated text strings (prompt NOT included).
+
+    Single alpha (float): all 10 prompts batched → returns list[str] of len 10.
+    Multi alpha (list[float]): all len(alphas)*10 sequences batched in ONE
+        generate() call → returns dict {alpha: list[str]} so 12 alpha levels
+        cost the same GPU time as 1.  This is ~12× faster for the alpha sweep.
     """
     import torch  # noqa: PLC0415
 
+    multi = isinstance(alpha, (list, tuple))
+    alphas: list[float] = list(alpha) if multi else [float(alpha)]
+    n_prompts = len(prompts)
+
+    # Tile: [p0,p1,...,p9, p0,...,p9, ...]  for each alpha level
+    tiled_prompts = prompts * len(alphas)
+    # alpha per row: first n_prompts rows get alphas[0], next get alphas[1], etc.
+    alpha_per_row = [a for a in alphas for _ in range(n_prompts)]
+    alpha_tensor  = torch.tensor(alpha_per_row, dtype=torch.float32)
+
     layer  = _get_layer_module(model, model_name, layer_idx)
-    hook   = _SteeringHook(steering_vector, alpha, device)
+    hook   = _SteeringHook(steering_vector, alpha_tensor, device)
     handle = hook.register(layer)
 
-    # Ensure the tokenizer has a pad token and pads on the left
-    # (decoder-only models generate from the right side of the prompt)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
     orig_padding_side = tokenizer.padding_side
     tokenizer.padding_side = "left"
 
-    generated: list[str] = []
     try:
         enc = tokenizer(
-            prompts,
+            tiled_prompts,
             return_tensors="pt",
             padding=True,
             truncation=True,
@@ -250,20 +280,26 @@ def _generate_with_steering(
             out_ids = model.generate(
                 **enc,
                 max_new_tokens=max_new_tokens,
-                do_sample=False,       # greedy — deterministic for reproducibility
+                do_sample=False,
                 temperature=1.0,
                 pad_token_id=tokenizer.eos_token_id,
             )
-        # Decode only the NEW tokens for each item in the batch
-        for i in range(len(prompts)):
-            new_ids = out_ids[i, prompt_lengths:]
-            text    = tokenizer.decode(new_ids, skip_special_tokens=True)
-            generated.append(text)
+        texts = [
+            tokenizer.decode(out_ids[i, prompt_lengths:], skip_special_tokens=True)
+            for i in range(len(tiled_prompts))
+        ]
     finally:
         handle.remove()
         tokenizer.padding_side = orig_padding_side
 
-    return generated
+    if not multi:
+        return texts   # list[str], original behaviour
+
+    # Split back by alpha group
+    result: dict[float, list[str]] = {}
+    for ai, a in enumerate(alphas):
+        result[a] = texts[ai * n_prompts: (ai + 1) * n_prompts]
+    return result
 
 
 # ── Perplexity helper ─────────────────────────────────────────────────────────
@@ -438,13 +474,17 @@ def _compute_concept_scp(
 
         log.info(f"      strategy {strat_id}  GPU: {gpu_mem_str(device)}")
 
+        # Batch ALL 12 alpha levels into a single generate() call (~12× faster)
+        all_texts: dict[float, list[str]] = _generate_with_steering(
+            model, tokenizer, model_name, layer_idx,
+            sv, SCP_ALPHAS, EVAL_PROMPTS, device,
+        )
+
+        # Score each alpha group and compute delta_c
         per_alpha: dict[str, float] = {}
         steered_texts_at_1: list[str] = []
         for alpha in SCP_ALPHAS:
-            steered_texts  = _generate_with_steering(
-                model, tokenizer, model_name, layer_idx,
-                sv, alpha, EVAL_PROMPTS, device,
-            )
+            steered_texts  = all_texts[alpha]
             steered_scores = score_texts(steered_texts, classifier, classifier_tok, device)
             delta_c        = float(np.mean(steered_scores)) - baseline_score
             per_alpha[str(alpha)] = round(delta_c, 5)
