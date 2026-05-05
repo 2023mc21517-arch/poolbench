@@ -662,68 +662,81 @@ def compute_all_pooling_strategies(act_dir, concepts: dict,
         for _txt, _doc in zip(_unique_texts, _nlp().pipe(_unique_texts, batch_size=64, n_process=1)):
             _doc_cache[_txt] = _doc
 
-        for strategy_id in STRATEGY_REGISTRY:
-            if strategy_id in OFF_LEADERBOARD:
-                continue  # G1_IxG runs separately via run_oracle_eval.py
+        # Collect strategies to run
+        active_strategies = [sid for sid in STRATEGY_REGISTRY if sid not in OFF_LEADERBOARD]
 
-            pool_fn = STRATEGY_REGISTRY[strategy_id][0]
+        def _apply_strategy(sid: str, acts, trg=dep_triggers) -> tuple[str, np.ndarray, dict]:
+            """Apply one strategy to all passages. Returns (side_key, pooled, local_fallbacks)."""
+            fn = STRATEGY_REGISTRY[sid][0]
+            local_fb: dict[str, int] = {s: 0 for s in _L_STRATS}
+            pooled = []
+            for item in acts:
+                h              = np.asarray(item["hidden"], dtype=np.float32)
+                offset_mapping = item.get("offset_mapping", [])
+                text           = item.get("text", "")
+                token_ids      = item.get("token_ids", [])
+                attn           = item.get("attn_weights")
+                try:
+                    if sid == "L1_POS_filtered":
+                        vec = fn(h, text, offset_mapping)
+                        if np.array_equal(vec, pool_mean(h)):
+                            local_fb["L1_POS_filtered"] += 1
+                    elif sid == "L2_dependency_rel":
+                        vec = fn(h, text, trg, offset_mapping)
+                        if np.array_equal(vec, pool_mean(h)):
+                            local_fb["L2_dependency_rel"] += 1
+                    elif sid == "L3_named_entity":
+                        vec = fn(h, text, offset_mapping)
+                        if np.array_equal(vec, pool_mean(h)):
+                            local_fb["L3_named_entity"] += 1
+                    elif sid == "L4_subword_root":
+                        if not tokenizer or not token_ids:
+                            raise RuntimeError(f"L4_subword_root/{concept_name} requires tokenizer and token_ids")
+                        vec = fn(h, token_ids, tokenizer)
+                    elif sid == "L5_SVO":
+                        vec = fn(h, text, offset_mapping)
+                        if np.array_equal(vec, pool_mean(h)):
+                            local_fb["L5_SVO"] += 1
+                    elif sid == "S1_attention_weighted":
+                        if attn is None:
+                            raise RuntimeError(f"S1_attention_weighted/{concept_name} requires attention weights")
+                        inflows = _attention_inflow_per_head(attn)
+                        if inflows is None:
+                            raise RuntimeError(f"S1_attention_weighted/{concept_name} requires attention weights")
+                        vec = fn(h, inflows.mean(axis=0))
+                    elif sid == "S2_SIF":
+                        if not token_ids:
+                            raise RuntimeError(f"S2_SIF/{concept_name} requires token_ids")
+                        vec = fn(h, token_ids, unigram_probs)
+                    elif sid == "S3_ITI_exact":
+                        probe = concept_probes.get(concept_name) if concept_probes else None
+                        vec = fn(h, attn, concept_probe=probe)
+                    else:
+                        vec = fn(h)
+                except Exception as exc:
+                    raise RuntimeError(f"Pooling failed for {sid}/{concept_name}: {exc}") from exc
+                pooled.append(vec)
+            return np.stack(pooled), local_fb  # (n_passages, d_model), fallback counts
 
-            def _apply(acts, _sid=strategy_id, _fn=pool_fn, _trg=dep_triggers):
-                pooled = []
-                for item in acts:
-                    h              = np.asarray(item["hidden"], dtype=np.float32)
-                    offset_mapping = item.get("offset_mapping", [])
-                    text           = item.get("text", "")
-                    token_ids      = item.get("token_ids", [])
-                    attn           = item.get("attn_weights")   # (n_heads, L) compact inflow or legacy (n_heads, L, L)
-                    try:
-                        if _sid == "L1_POS_filtered":
-                            vec = _fn(h, text, offset_mapping)
-                            if np.array_equal(vec, pool_mean(h)):
-                                _fallback_counts["L1_POS_filtered"] += 1
-                        elif _sid == "L2_dependency_rel":
-                            vec = _fn(h, text, _trg, offset_mapping)
-                            if np.array_equal(vec, pool_mean(h)):
-                                _fallback_counts["L2_dependency_rel"] += 1
-                        elif _sid == "L3_named_entity":
-                            vec = _fn(h, text, offset_mapping)
-                            if np.array_equal(vec, pool_mean(h)):
-                                _fallback_counts["L3_named_entity"] += 1
-                        elif _sid == "L4_subword_root":
-                            if not tokenizer or not token_ids:
-                                raise RuntimeError(f"L4_subword_root/{concept_name} requires tokenizer and token_ids")
-                            vec = _fn(h, token_ids, tokenizer)
-                        elif _sid == "L5_SVO":
-                            vec = _fn(h, text, offset_mapping)
-                            if np.array_equal(vec, pool_mean(h)):
-                                _fallback_counts["L5_SVO"] += 1
-                        elif _sid == "S1_attention_weighted":
-                            if attn is None:
-                                raise RuntimeError(f"S1_attention_weighted/{concept_name} requires attention weights")
-                            inflows = _attention_inflow_per_head(attn)
-                            if inflows is None:
-                                raise RuntimeError(f"S1_attention_weighted/{concept_name} requires attention weights")
-                            token_inflow = inflows.mean(axis=0)  # (seq_len,)
-                            vec = _fn(h, token_inflow)
-                        elif _sid == "S2_SIF":
-                            if not token_ids:
-                                raise RuntimeError(f"S2_SIF/{concept_name} requires token_ids")
-                            vec = _fn(h, token_ids, unigram_probs)
-                        elif _sid == "S3_ITI_exact":
-                            probe = concept_probes.get(concept_name) if concept_probes else None
-                            vec = _fn(h, attn, concept_probe=probe)
-                        else:
-                            vec = _fn(h)
-                    except Exception as exc:
-                        raise RuntimeError(f"Pooling failed for {_sid}/{concept_name}: {exc}") from exc
-                    pooled.append(vec)
-                return np.stack(pooled)   # (n_passages, d_model)
+        import concurrent.futures as _cf
+        import os as _os
+        # Run all strategies in parallel (they share read-only pos_acts/neg_acts/_doc_cache)
+        n_workers = min(len(active_strategies), (_os.cpu_count() or 4))
 
-            key = f"{concept_name}_{strategy_id}"
-            results[key] = {
-                "pos_pooled": _apply(pos_acts),
-                "neg_pooled": _apply(neg_acts),
-            }
+        def _run_sid(sid):
+            pos_pooled, fb_pos = _apply_strategy(sid, pos_acts)
+            neg_pooled, fb_neg = _apply_strategy(sid, neg_acts)
+            combined_fb = {s: fb_pos[s] + fb_neg[s] for s in fb_pos}
+            return sid, pos_pooled, neg_pooled, combined_fb
+
+        with _cf.ThreadPoolExecutor(max_workers=n_workers) as pool:
+            for sid, pos_pooled, neg_pooled, fb in pool.map(_run_sid, active_strategies):
+                results[f"{concept_name}_{sid}"] = {
+                    "pos_pooled": pos_pooled,
+                    "neg_pooled": neg_pooled,
+                }
+                for s, count in fb.items():
+                    _fallback_counts[s] += count
 
     # S2 SIF: subtract first principal component at corpus level
     if unigram_probs:
