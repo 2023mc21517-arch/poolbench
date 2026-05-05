@@ -1064,6 +1064,10 @@ def run_model(model_name: str, args: argparse.Namespace) -> dict:
         step_extract(model_name, device=args.device, concept_filter=concept_filter,
                      skip_existing=not force_step(1))
 
+    if args.extraction_only:
+        log.info("  [extraction_only] Step 1 complete — exiting (--extraction_only)")
+        return
+
     # Step 3 runs BEFORE the main pooling sweep (§38 pre-check requirement).
     # Linearity is assessed on the middle candidate layer under mean pooling before
     # any strategy ranking begins, so the check is not biased by layer selection.
@@ -1202,6 +1206,8 @@ def main():
                         help="When --device auto: minimum free VRAM (GB) to consider a GPU usable (default 20)")
     parser.add_argument("--skip_extraction", action="store_true",
                         help="Skip activation extraction (assume already done)")
+    parser.add_argument("--extraction_only", action="store_true",
+                        help="Run only Step 1 (activation extraction) and exit")
     parser.add_argument("--skip_scp", action="store_true",
                         help="Skip D2 SCP and D3 disentanglement steps")
     parser.add_argument("--skip_sae_interp", action="store_true",
