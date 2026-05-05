@@ -670,7 +670,7 @@ def compute_all_pooling_strategies(act_dir, concepts: dict,
             fn = STRATEGY_REGISTRY[sid][0]
             local_fb: dict[str, int] = {s: 0 for s in _L_STRATS}
             pooled = []
-            for item in acts:
+            for idx, item in enumerate(acts):  # idx used for A3_random passage-unique seed
                 h              = np.asarray(item["hidden"], dtype=np.float32)
                 offset_mapping = item.get("offset_mapping", [])
                 text           = item.get("text", "")
@@ -697,6 +697,11 @@ def compute_all_pooling_strategies(act_dir, concepts: dict,
                         vec = fn(h, text, offset_mapping)
                         if np.array_equal(vec, pool_mean(h)):
                             local_fb["L5_SVO"] += 1
+                    elif sid == "A3_random":
+                        # Passage-unique seed so each passage samples different token positions
+                        # but results are fully reproducible (seed = 42 + passage index).
+                        # Must match compute_pooled_vectors() which uses the same formula.
+                        vec = fn(h, seed=42 + idx)
                     elif sid == "S1_attention_weighted":
                         if attn is None:
                             raise RuntimeError(f"S1_attention_weighted/{concept_name} requires attention weights")

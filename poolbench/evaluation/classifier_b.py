@@ -596,15 +596,17 @@ def _custom_load(concept: str, cfg: dict,
                     continue
                 step_text = m.group(1).strip()
                 correct_goal = (row.get("targets") or [""])[0].strip()
-                # Distractors = choices that are NOT the correct goal
+                # Distractors = other valid WikiHow goals (NOT the correct goal for this step)
                 distractors = [c for c in (row.get("multiple_choice_targets") or [])
                                if c != correct_goal]
-                if step_text and len(step_text) >= 10:
-                    # positive = "<step> → <correct goal>"  gives planning context
-                    pos_texts.append(f"{step_text} Goal: {correct_goal}")
-                if distractors:
-                    # negative = just the distractor goal title alone (no step context = no planning)
-                    neg_texts.append(distractors[0])
+                if not step_text or len(step_text) < 10 or not correct_goal or not distractors:
+                    continue
+                # positive = step paired with its TRUE goal  (step genuinely belongs to goal)
+                pos_texts.append(f"{step_text} Goal: {correct_goal}")
+                # negative = SAME step paired with a WRONG goal
+                # (plausible-sounding step-goal pair that is factually incoherent)
+                # This matches §methodology: "plausible step from a different goal"
+                neg_texts.append(f"{step_text} Goal: {distractors[0]}")
                 if len(pos_texts) >= max_per_class and len(neg_texts) >= max_per_class:
                     break
             if len(pos_texts) < 50 or len(neg_texts) < 50:
@@ -769,6 +771,13 @@ def train_classifier_b(
     return save_dir
 
 
+# Concepts whose anchor construction was fixed after an initial training run.
+# Listed here so Step 5 automatically retrains them even when a checkpoint exists,
+# without forcing a full retrain of all 17 concepts.
+# Clear this set once all models have been re-run with the corrected anchors.
+ANCHOR_FIXED_CONCEPTS: frozenset[str] = frozenset({"planning"})  # fixed: step+wrong_goal negative
+
+
 def train_all_classifiers_b(
     classifiers_dir: str | Path,
     device: str = "cuda:0",
@@ -781,9 +790,13 @@ def train_all_classifiers_b(
     failures = {}
     for concept in CONCEPT_NAMES:
         log.info(f"\n--- Classifier B: {concept} ---")
+        # Always retrain concepts whose anchor construction was corrected post-initial-run
+        concept_force = force_retrain or (concept in ANCHOR_FIXED_CONCEPTS)
+        if concept in ANCHOR_FIXED_CONCEPTS and not force_retrain:
+            log.info(f"  [classifier_b] '{concept}' is in ANCHOR_FIXED_CONCEPTS — forcing retrain")
         try:
             path = train_classifier_b(concept, classifiers_dir, device,
-                                      max_samples, force_retrain)
+                                      max_samples, concept_force)
             results[concept] = path
         except Exception as exc:
             log.error(f"  [FAIL] Classifier B for '{concept}' FAILED: {exc}")
