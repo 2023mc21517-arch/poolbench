@@ -197,7 +197,7 @@ CONCEPTS = {
         "positive_def": "Bureaucratic or administrative writing style (forms, memos, policies)",
         "negative_def": "Plain conversational version of same content",
         "hf_source_pos": "pile-of-law/pile-of-law",
-        "hf_source_neg": "daily_dialog",
+        "hf_source_neg": "Yelp/yelp_review_full",    # Classifier B anchor; corpus negatives use daily_dialog
     },
 
     # ── SEMANTIC-ABSTRACT ────────────────────────────────────────────────

@@ -6,7 +6,7 @@ Classifier B is trained EXCLUSIVELY on external anchor datasets (never on PoolBe
 corpus passages) to prevent circularity between D1 and D2 scores (§51 of methodology).
 
 Four concepts use zero-shot LLM scoring instead of Classifier B (§52):
-    bureaucratic, deference, planning, legal_formality
+    (none — all 17 concepts now have BERT Classifier B anchors)
 
 All others: fine-tune bert-base-uncased on the external anchor, save to:
     {classifiers_dir}/{concept}/
@@ -496,8 +496,8 @@ def _custom_load(concept: str, cfg: dict,
 
         elif concept == "bureaucratic":
             # ccdv/govreport-summarization: report field = government/bureaucratic prose (positive)
-            # Use the summary field truncated to ~400 chars as informal contrasting negative is
-            # not available here — instead pull DailyDialog turns as informal negatives.
+            # Yelp 1-star reviews as informal negatives (daily_dialog was same as corpus neg source
+            # and is no longer reliably available on HF without trust_remote_code).
             import re as _re  # noqa: PLC0415
             ds = load_dataset(cfg["hf_id"], cfg.get("config"),
                               split=cfg["split"], streaming=True)
@@ -512,23 +512,22 @@ def _custom_load(concept: str, cfg: dict,
                     break
             neg_texts = []
             try:
-                dial_ds = load_dataset("daily_dialog", split="train", streaming=True)
-                for row in dial_ds:
-                    for turn in (row.get("dialog") or []):
-                        turn = str(turn).strip()
-                        if len(turn) >= 30:
-                            neg_texts.append(turn)
-                        if len(neg_texts) >= max_per_class:
-                            break
+                yelp_ds = load_dataset("Yelp/yelp_review_full", split="train", streaming=True)
+                for row in yelp_ds:
+                    # Use 1-star and 2-star reviews as informal/colloquial negatives
+                    if str(row.get("label", "")) in ("0", "1"):
+                        text = str(row.get("text", "")).strip()[:400]
+                        if len(text) >= 50:
+                            neg_texts.append(text)
                     if len(neg_texts) >= max_per_class:
                         break
             except Exception as exc:
-                raise RuntimeError("bureaucratic: could not load daily_dialog negatives") from exc
+                raise RuntimeError("bureaucratic: could not load Yelp informal negatives") from exc
             if len(pos_texts) < 50 or len(neg_texts) < 50:
                 raise RuntimeError(f"bureaucratic anchor too small: pos={len(pos_texts)} neg={len(neg_texts)}")
             texts  = pos_texts[:max_per_class] + neg_texts[:max_per_class]
             labels = [1] * min(len(pos_texts), max_per_class) + [0] * min(len(neg_texts), max_per_class)
-            log.info(f"  [classifier_b] bureaucratic anchor (govreport/daily_dialog): pos={len(pos_texts)} neg={len(neg_texts)}")
+            log.info(f"  [classifier_b] bureaucratic anchor (govreport/yelp): pos={len(pos_texts)} neg={len(neg_texts)}")
             return texts, labels
 
         elif concept == "legal_formality":

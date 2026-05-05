@@ -989,7 +989,10 @@ def run_model(model_name: str, args: argparse.Namespace) -> dict:
 
         if not skip_scp:
             # Step 5 — Train Classifier B on GPU (BERT is small ~500 MB, releases before Step 6)
-            step_train_classifiers(device=args.device, force_retrain=force_step(5))
+            # force_step(5) means "resume from step 5" — always skip already-complete classifiers.
+            # train_classifier_b() is idempotent: it checks _classifier_artifact_complete() and
+            # skips any concept whose checkpoint is already intact.
+            step_train_classifiers(device=args.device, force_retrain=False)
 
             # Steps 6, 6b, 7 share the same base LLM — load once, pass through all three.
             # But skip the load entirely when all three steps are already checkpointed.
