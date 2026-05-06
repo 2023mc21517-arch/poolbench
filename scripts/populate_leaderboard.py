@@ -279,6 +279,22 @@ def main() -> None:
                   f"{str(m['D3_mean_LD']):>8}  "
                   f"{str(m['D3_mean_LC']):>8}")
 
+        # Per-concept breakdown (full model×concept×strategy table)
+        print(f"\n  --- Per-concept breakdown ---")
+        for concept, strat_dict in sorted(data["per_concept"].items()):
+            print(f"\n  concept: {concept}")
+            print(f"  {'Strategy':<28s}  {'D1':>8}  {'D2_scp':>8}  {'D2_Mc':>7}  {'D2_phi':>7}  {'D3_LD':>8}  {'D3_LC':>8}")
+            for s in RANKED_STRATEGIES:
+                c = strat_dict[s]
+                def _fmt(v): return f"{float(v):.5f}" if v is not None else "   None"
+                print(f"  {s:<28s}  "
+                      f"{_fmt(c['D1_auroc']):>8}  "
+                      f"{_fmt(c['D2_scp_c']):>8}  "
+                      f"{_fmt(c['D2_M_c']):>7}  "
+                      f"{_fmt(c['D2_phi_c']):>7}  "
+                      f"{_fmt(c['D3_LD']):>8}  "
+                      f"{_fmt(c['D3_LC']):>8}")
+
         if not args.dry_run:
             _write_summary(summary_lb, model_name, lb_key, data, args.dry_run)
             _write_full(full_lb,    model_name, lb_key, data, args.dry_run)
