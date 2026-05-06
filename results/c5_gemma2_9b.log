@@ -1,0 +1,40 @@
+[14:08:26] [INF] [device] Using explicitly requested device: cuda:0
+[14:08:26] [INF] 
+============================================================
+[14:08:26] [INF]   MODEL: gemma2_9b
+[14:08:26] [INF] ============================================================
+[14:08:26] [INF] 
+============================================================
+[14:08:26] [INF]   PoolBench pipeline starting: model=gemma2_9b  device=cuda:0
+[14:08:26] [INF]   GPU on start: 0.0/85 GB (0%)
+[14:08:26] [INF] ============================================================
+[14:08:26] [INF] 
+=== Step 3: Linearity check — gemma2_9b L28 ===  GPU: 0.0/85 GB (0%)
+[14:08:26] [INF]   [checkpoint] Step 3 already complete → /teamspace/studios/this_studio/poolbench/results/linearity/gemma2_9b_linearity.json; skipping
+[14:08:26] [INF] 
+=== Step 2: Pool + AUROC — gemma2_9b (C5_sae_feature) ===  GPU: 0.0/85 GB (0%)
+[14:08:26] [INF] 
+  Layer 14  GPU: 0.0/85 GB (0%)
+[14:08:26] [INF]   [checkpoint] Step 2 layer 14: resuming 12/17 incomplete concepts (228 missing cells)
+[14:08:26] [INF]   [pool cache] Loading pre-computed pooled vectors from /teamspace/studios/this_studio/poolbench/results/pooled_cache/gemma2_9b/layer_14_pooled.pkl
+[14:08:57] [INF] [sae_loader] Loading SAE  release=gemma-scope-9b-pt-res-canonical  sae_id=layer_14/width_16k/canonical ...
+[14:09:13] [INF] [sae_loader] Loaded SAE for gemma2_9b L14: d_in=3584  d_sae=16384
+[14:09:13] [INF]   [probe] Running 0 AUROC computations with 0 parallel workers
+Traceback (most recent call last):
+  File "/teamspace/studios/this_studio/poolbench/scripts/run_model.py", line 1399, in <module>
+    main()
+  File "/teamspace/studios/this_studio/poolbench/scripts/run_model.py", line 1373, in main
+    model_results = run_model(model_name, args)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/teamspace/studios/this_studio/poolbench/scripts/run_model.py", line 1190, in run_model
+    auroc_summary = step_pool_and_auroc(
+                    ^^^^^^^^^^^^^^^^^^^^
+  File "/teamspace/studios/this_studio/poolbench/scripts/run_model.py", line 417, in step_pool_and_auroc
+    auroc_res = compute_all_train_test_auroc(
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/teamspace/studios/this_studio/poolbench/poolbench/evaluation/probe.py", line 326, in compute_all_train_test_auroc
+    with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as pool:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/concurrent/futures/thread.py", line 148, in __init__
+    raise ValueError("max_workers must be greater than 0")
+ValueError: max_workers must be greater than 0

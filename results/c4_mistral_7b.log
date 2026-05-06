@@ -1,0 +1,85 @@
+[13:43:29] [INF] [device] Using explicitly requested device: cpu
+[13:43:29] [INF] 
+============================================================
+[13:43:29] [INF]   MODEL: mistral_7b
+[13:43:29] [INF] ============================================================
+[13:43:29] [INF] 
+============================================================
+[13:43:29] [INF]   PoolBench pipeline starting: model=mistral_7b  device=cpu
+[13:43:29] [INF]   GPU on start: 0.0/85 GB (0%)
+[13:43:29] [INF] ============================================================
+[13:43:29] [INF] 
+=== Step 3: Linearity check — mistral_7b L16 ===  GPU: 0.0/85 GB (0%)
+[13:43:29] [INF]   [checkpoint] Step 3 already complete → /teamspace/studios/this_studio/poolbench/results/linearity/mistral_7b_linearity.json; skipping
+[13:43:29] [INF] 
+=== Step 2: Pool + AUROC — mistral_7b (C4_repe) ===  GPU: 0.0/85 GB (0%)
+[13:43:29] [INF] 
+  Layer 8  GPU: 0.0/85 GB (0%)
+[13:43:29] [INF]   [checkpoint] Step 2 layer 8: resuming 2/17 incomplete concepts (38 missing cells)
+[13:47:50] [INF]   [ITI probe 1/2] negation_density: N=1396 H=32 D=4096 feat=47.3s  total=242.6s  best_head_auroc=0.512
+[13:54:28] [INF]   [ITI probe 2/2] numerical_precision: N=1400 H=32 D=4096 feat=44.3s  total=398.8s  best_head_auroc=0.982
+[13:54:29] [INF]   [pool] S2 unigram vocab=18944  S3 ITI probes=2
+[13:54:29] [INF]   [pool] L8 concept 1/2: negation_density
+  S2 SIF: first PC subtracted across 1 concept×split pairs.
+  [WARN] L2_dependency_rel fallback rate 100.0% > 30% — strategy is effectively mean pooling
+  S2 SIF: first PC subtracted across 1 concept×split pairs.
+  [WARN] L2_dependency_rel fallback rate 100.0% > 30% — strategy is effectively mean pooling
+[13:57:42] [INF]   [pool] L8 concept 2/2: numerical_precision
+  S2 SIF: first PC subtracted across 1 concept×split pairs.
+  [WARN] L2_dependency_rel fallback rate 100.0% > 30% — strategy is effectively mean pooling
+  S2 SIF: first PC subtracted across 1 concept×split pairs.
+  [WARN] L2_dependency_rel fallback rate 100.0% > 30% — strategy is effectively mean pooling
+[14:03:55] [INF]   [pool cache] Saved → /teamspace/studios/this_studio/poolbench/results/pooled_cache/mistral_7b/layer_8_pooled.pkl
+[14:03:55] [INF]   [probe] Running 38 AUROC computations with 26 parallel workers
+[14:04:53] [INF]   [probe] 1/38  negation_density_L1_POS_filtered  AUROC=0.481  CI=[0.451,0.511]  std=0.0153  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:04:54] [INF]   [probe] 2/38  negation_density_P1_last_token  AUROC=0.489  CI=[0.458,0.517]  std=0.0150  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:04:54] [INF]   [probe] 3/38  negation_density_L3_named_entity  AUROC=0.481  CI=[0.451,0.510]  std=0.0151  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:04:54] [INF]   [probe] 4/38  negation_density_L5_SVO  AUROC=0.483  CI=[0.454,0.513]  std=0.0153  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:04:55] [INF]   [probe] 5/38  negation_density_A1_mean  AUROC=0.479  CI=[0.451,0.510]  std=0.0152  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:04:55] [INF]   [probe] 6/38  negation_density_W1_mean_last_4  AUROC=0.494  CI=[0.462,0.525]  std=0.0160  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:04:59] [INF]   [probe] 7/38  negation_density_S3_ITI_exact  AUROC=0.477  CI=[0.448,0.507]  std=0.0153  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:05:00] [INF]   [probe] 8/38  negation_density_A2_max  AUROC=0.470  CI=[0.442,0.501]  std=0.0156  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:05:00] [INF]   [probe] 9/38  negation_density_W2_mean_last_8  AUROC=0.489  CI=[0.457,0.519]  std=0.0159  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:05:00] [INF]   [probe] 10/38  negation_density_P2_first_token  AUROC=0.506  CI=[0.478,0.538]  std=0.0153  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:05:01] [INF]   [probe] 11/38  numerical_precision_A2_max  AUROC=0.691  CI=[0.662,0.720]  std=0.0148  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:05:01] [INF]   [probe] 12/38  negation_density_A4_norm  AUROC=0.477  CI=[0.449,0.507]  std=0.0153  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:05:01] [INF]   [probe] 13/38  negation_density_A3_random  AUROC=0.488  CI=[0.457,0.518]  std=0.0155  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:05:01] [INF]   [probe] 14/38  numerical_precision_A4_norm  AUROC=0.694  CI=[0.663,0.724]  std=0.0158  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:05:01] [INF]   [probe] 15/38  negation_density_W3_mean_last_16  AUROC=0.484  CI=[0.452,0.515]  std=0.0155  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:05:01] [INF]   [probe] 16/38  negation_density_L2_dependency_rel  AUROC=0.479  CI=[0.451,0.510]  std=0.0152  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:05:02] [INF]   [probe] 17/38  numerical_precision_L2_dependency_rel  AUROC=0.679  CI=[0.647,0.710]  std=0.0161  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:05:02] [INF]   [probe] 18/38  negation_density_S2_SIF  AUROC=0.479  CI=[0.448,0.508]  std=0.0151  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:05:03] [INF]   [probe] 19/38  numerical_precision_A1_mean  AUROC=0.679  CI=[0.647,0.710]  std=0.0161  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:05:03] [INF]   [probe] 20/38  numerical_precision_L1_POS_filtered  AUROC=0.709  CI=[0.679,0.739]  std=0.0156  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:05:03] [INF]   [probe] 21/38  numerical_precision_L3_named_entity  AUROC=0.684  CI=[0.654,0.713]  std=0.0159  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:05:03] [INF]   [probe] 22/38  negation_density_W4_hierarchical  AUROC=0.481  CI=[0.452,0.512]  std=0.0153  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:05:03] [INF]   [probe] 23/38  negation_density_P3_CLS  AUROC=0.489  CI=[0.460,0.519]  std=0.0155  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:05:03] [INF]   [probe] 24/38  numerical_precision_A3_random  AUROC=0.508  CI=[0.479,0.537]  std=0.0153  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:05:04] [INF]   [probe] 25/38  negation_density_L4_subword_root  AUROC=0.486  CI=[0.457,0.516]  std=0.0150  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:05:05] [INF]   [probe] 26/38  negation_density_S1_attention_weighted  AUROC=0.478  CI=[0.449,0.508]  std=0.0153  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:05:27] [INF]   [probe] 27/38  numerical_precision_P1_last_token  AUROC=0.685  CI=[0.657,0.715]  std=0.0149  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:05:28] [INF]   [probe] 28/38  numerical_precision_P2_first_token  AUROC=0.488  CI=[0.458,0.518]  std=0.0155  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:05:28] [INF]   [probe] 29/38  numerical_precision_P3_CLS  AUROC=0.636  CI=[0.605,0.664]  std=0.0148  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:05:29] [INF]   [probe] 30/38  numerical_precision_L4_subword_root  AUROC=0.694  CI=[0.664,0.723]  std=0.0157  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:05:29] [INF]   [probe] 31/38  numerical_precision_L5_SVO  AUROC=0.698  CI=[0.668,0.728]  std=0.0157  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:05:30] [INF]   [probe] 32/38  numerical_precision_S1_attention_weighted  AUROC=0.701  CI=[0.670,0.730]  std=0.0156  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:05:30] [INF]   [probe] 33/38  numerical_precision_W1_mean_last_4  AUROC=0.707  CI=[0.678,0.734]  std=0.0146  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:05:30] [INF]   [probe] 34/38  numerical_precision_W2_mean_last_8  AUROC=0.721  CI=[0.693,0.747]  std=0.0143  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:05:30] [INF]   [probe] 35/38  numerical_precision_S3_ITI_exact  AUROC=0.703  CI=[0.672,0.733]  std=0.0156  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:05:30] [INF]   [probe] 36/38  numerical_precision_W4_hierarchical  AUROC=0.678  CI=[0.647,0.709]  std=0.0161  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:05:31] [INF]   [probe] 37/38  numerical_precision_W3_mean_last_16  AUROC=0.708  CI=[0.679,0.737]  std=0.0150  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:05:31] [INF]   [probe] 38/38  numerical_precision_S2_SIF  AUROC=0.670  CI=[0.640,0.698]  std=0.0148  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:05:31] [INF]   [probe] Saved train/test AUROC results → /teamspace/studios/this_studio/poolbench/results/auroc/mistral_7b/C4_repe/layer_8/mistral_7b_auroc_results.json
+[14:05:31] [INF]   [checkpoint] Layer 8 saved → /teamspace/studios/this_studio/poolbench/results/auroc/mistral_7b/C4_repe/layer_8/mistral_7b_auroc_results.json
+[14:05:31] [INF] 
+  Layer 16  GPU: 0.0/85 GB (0%)
+[14:05:31] [INF]   [checkpoint] Step 2 layer 16: resuming 2/17 incomplete concepts (38 missing cells)
+[14:10:51] [INF]   [ITI probe 1/2] narrative: N=1400 H=32 D=4096 feat=33.9s  total=296.2s  best_head_auroc=1.000
+[14:16:35] [INF]   [ITI probe 2/2] numerical_precision: N=1400 H=32 D=4096 feat=69.4s  total=343.9s  best_head_auroc=0.988
+[14:16:35] [INF]   [pool] S2 unigram vocab=20048  S3 ITI probes=2
+[14:16:35] [INF]   [pool] L16 concept 1/2: narrative
+  S2 SIF: first PC subtracted across 1 concept×split pairs.
+  [WARN] L2_dependency_rel fallback rate 100.0% > 30% — strategy is effectively mean pooling
+  S2 SIF: first PC subtracted across 1 concept×split pairs.
+  [WARN] L2_dependency_rel fallback rate 100.0% > 30% — strategy is effectively mean pooling
+[14:31:14] [INF]   [pool] L16 concept 2/2: numerical_precision

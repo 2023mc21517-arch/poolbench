@@ -1,0 +1,63 @@
+[14:19:17] [INF] [device] Using explicitly requested device: cuda:0
+[14:19:17] [INF] 
+============================================================
+[14:19:17] [INF]   MODEL: mistral_7b
+[14:19:17] [INF] ============================================================
+[14:19:17] [INF] 
+============================================================
+[14:19:17] [INF]   PoolBench pipeline starting: model=mistral_7b  device=cuda:0
+[14:19:17] [INF]   GPU on start: 0.0/85 GB (0%)
+[14:19:17] [INF] ============================================================
+[14:19:17] [INF] 
+=== Step 3: Linearity check — mistral_7b L16 ===  GPU: 0.0/85 GB (0%)
+[14:19:17] [INF]   [checkpoint] Step 3 already complete → /teamspace/studios/this_studio/poolbench/results/linearity/mistral_7b_linearity.json; skipping
+[14:19:17] [INF] 
+=== Step 2: Pool + AUROC — mistral_7b (C5_sae_feature) ===  GPU: 0.0/85 GB (0%)
+[14:19:17] [INF] 
+  Layer 8  GPU: 0.0/85 GB (0%)
+[14:19:17] [INF]   [pool cache] Loading pre-computed pooled vectors from /teamspace/studios/this_studio/poolbench/results/pooled_cache/mistral_7b/layer_8_pooled.pkl
+[14:19:40] [INF] [sae_loader] Loading SAE  release=mistral-7b-res-wg  sae_id=blocks.8.hook_resid_pre ...
+[14:19:48] [INF] [sae_loader] Loaded SAE for mistral_7b L8: d_in=4096  d_sae=65536
+[14:19:48] [INF]   [probe] Running 38 AUROC computations with 26 parallel workers
+[14:21:48] [INF]   [probe] 1/38  negation_density_W2_mean_last_8  AUROC=0.439  CI=[0.407,0.467]  std=0.0152  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:21:48] [INF]   [probe] 2/38  negation_density_A3_random  AUROC=0.475  CI=[0.444,0.504]  std=0.0155  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:21:48] [INF]   [probe] 3/38  negation_density_L3_named_entity  AUROC=0.455  CI=[0.424,0.486]  std=0.0159  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:21:48] [INF]   [probe] 4/38  negation_density_S2_SIF  AUROC=0.483  CI=[0.452,0.513]  std=0.0152  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:21:49] [INF]   [probe] 5/38  negation_density_A4_norm  AUROC=0.468  CI=[0.438,0.498]  std=0.0156  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:21:59] [INF]   [probe] 6/38  negation_density_S3_ITI_exact  AUROC=0.491  CI=[0.462,0.523]  std=0.0152  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:22:03] [INF]   [probe] 7/38  negation_density_P1_last_token  AUROC=0.479  CI=[0.449,0.508]  std=0.0150  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:22:23] [INF]   [probe] 8/38  negation_density_W3_mean_last_16  AUROC=0.451  CI=[0.421,0.480]  std=0.0151  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:22:23] [INF]   [probe] 9/38  numerical_precision_L1_POS_filtered  AUROC=0.918  CI=[0.904,0.932]  std=0.0072  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:22:23] [INF]   [probe] 10/38  negation_density_A2_max  AUROC=0.506  CI=[0.473,0.533]  std=0.0156  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:22:24] [INF]   [probe] 11/38  negation_density_A1_mean  AUROC=0.463  CI=[0.433,0.493]  std=0.0154  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:22:24] [INF]   [probe] 12/38  numerical_precision_A2_max  AUROC=0.653  CI=[0.620,0.678]  std=0.0149  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:22:24] [INF]   [probe] 13/38  numerical_precision_L2_dependency_rel  AUROC=0.931  CI=[0.918,0.943]  std=0.0064  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:22:25] [INF]   [probe] 14/38  negation_density_W4_hierarchical  AUROC=0.467  CI=[0.437,0.496]  std=0.0155  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:22:25] [INF]   [probe] 15/38  negation_density_L1_POS_filtered  AUROC=0.462  CI=[0.432,0.493]  std=0.0155  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:22:25] [INF]   [probe] 16/38  numerical_precision_A1_mean  AUROC=0.931  CI=[0.918,0.943]  std=0.0064  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:22:25] [INF]   [probe] 17/38  negation_density_W1_mean_last_4  AUROC=0.441  CI=[0.411,0.468]  std=0.0151  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:22:25] [INF]   [probe] 18/38  numerical_precision_A4_norm  AUROC=0.904  CI=[0.888,0.919]  std=0.0080  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:22:25] [INF]   [probe] 19/38  negation_density_L4_subword_root  AUROC=0.469  CI=[0.438,0.500]  std=0.0157  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:22:26] [INF]   [probe] 20/38  negation_density_P2_first_token  AUROC=0.503  CI=[0.475,0.532]  std=0.0156  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:22:26] [INF]   [probe] 21/38  numerical_precision_A3_random  AUROC=0.746  CI=[0.722,0.771]  std=0.0126  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:22:27] [INF]   [probe] 22/38  negation_density_L2_dependency_rel  AUROC=0.463  CI=[0.433,0.493]  std=0.0154  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:22:27] [INF]   [probe] 23/38  negation_density_L5_SVO  AUROC=0.462  CI=[0.431,0.493]  std=0.0156  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:22:27] [INF]   [probe] 24/38  numerical_precision_L3_named_entity  AUROC=0.914  CI=[0.899,0.930]  std=0.0078  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:22:27] [INF]   [probe] 25/38  negation_density_P3_CLS  AUROC=0.472  CI=[0.442,0.504]  std=0.0155  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:22:27] [INF]   [probe] 26/38  negation_density_S1_attention_weighted  AUROC=0.494  CI=[0.464,0.524]  std=0.0153  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[14:24:00] [INF]   [probe] 27/38  numerical_precision_L4_subword_root  AUROC=0.882  CI=[0.863,0.898]  std=0.0090  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:24:01] [INF]   [probe] 28/38  numerical_precision_S1_attention_weighted  AUROC=0.615  CI=[0.586,0.643]  std=0.0148  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:24:04] [INF]   [probe] 29/38  numerical_precision_L5_SVO  AUROC=0.923  CI=[0.909,0.936]  std=0.0070  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:24:17] [INF]   [probe] 30/38  numerical_precision_P2_first_token  AUROC=0.480  CI=[0.452,0.513]  std=0.0155  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:24:23] [INF]   [probe] 31/38  numerical_precision_P1_last_token  AUROC=0.726  CI=[0.698,0.754]  std=0.0141  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:24:24] [INF]   [probe] 32/38  numerical_precision_P3_CLS  AUROC=0.636  CI=[0.606,0.665]  std=0.0148  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:24:24] [INF]   [probe] 33/38  numerical_precision_S2_SIF  AUROC=0.678  CI=[0.649,0.705]  std=0.0143  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:24:32] [INF]   [probe] 34/38  numerical_precision_S3_ITI_exact  AUROC=0.614  CI=[0.585,0.642]  std=0.0152  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:24:32] [INF]   [probe] 35/38  numerical_precision_W1_mean_last_4  AUROC=0.814  CI=[0.792,0.836]  std=0.0114  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:24:33] [INF]   [probe] 36/38  numerical_precision_W4_hierarchical  AUROC=0.923  CI=[0.910,0.937]  std=0.0069  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:24:34] [INF]   [probe] 37/38  numerical_precision_W3_mean_last_16  AUROC=0.866  CI=[0.849,0.886]  std=0.0095  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:24:35] [INF]   [probe] 38/38  numerical_precision_W2_mean_last_8  AUROC=0.853  CI=[0.834,0.872]  std=0.0099  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:24:35] [INF]   [probe] Saved train/test AUROC results → /teamspace/studios/this_studio/poolbench/results/auroc/mistral_7b/C5_sae_feature/layer_8/mistral_7b_auroc_results.json
+[14:24:35] [INF]   [checkpoint] Layer 8 saved → /teamspace/studios/this_studio/poolbench/results/auroc/mistral_7b/C5_sae_feature/layer_8/mistral_7b_auroc_results.json
+[14:24:35] [INF] 
+  Layer 16  GPU: 0.0/85 GB (0%)

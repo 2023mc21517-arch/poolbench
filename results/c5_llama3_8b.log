@@ -1,0 +1,40 @@
+[14:26:11] [INF] [device] Using explicitly requested device: cuda:0
+[14:26:11] [INF] 
+============================================================
+[14:26:11] [INF]   MODEL: llama3_8b
+[14:26:11] [INF] ============================================================
+[14:26:11] [INF] 
+============================================================
+[14:26:11] [INF]   PoolBench pipeline starting: model=llama3_8b  device=cuda:0
+[14:26:11] [INF]   GPU on start: 0.0/85 GB (0%)
+[14:26:11] [INF] ============================================================
+[14:26:11] [INF] 
+=== Step 3: Linearity check — llama3_8b L24 ===  GPU: 0.0/85 GB (0%)
+[14:26:11] [INF]   [checkpoint] Step 3 already complete → /teamspace/studios/this_studio/poolbench/results/linearity/llama3_8b_linearity.json; skipping
+[14:26:11] [INF] 
+=== Step 2: Pool + AUROC — llama3_8b (C5_sae_feature) ===  GPU: 0.0/85 GB (0%)
+[14:26:11] [INF] 
+  Layer 16  GPU: 0.0/85 GB (0%)
+[14:26:11] [INF]   [checkpoint] Step 2 layer 16: resuming 15/17 incomplete concepts (285 missing cells)
+[14:26:11] [INF]   [pool cache] Loading pre-computed pooled vectors from /teamspace/studios/this_studio/poolbench/results/pooled_cache/llama3_8b/layer_16_pooled.pkl
+[14:26:38] [INF] [sae_loader] Loading SAE  release=llama_scope_lxr_8x  sae_id=l16r_8x ...
+[14:26:50] [INF] [sae_loader] Loaded SAE for llama3_8b L16: d_in=4096  d_sae=32768
+[14:26:50] [INF]   [probe] Running 0 AUROC computations with 0 parallel workers
+Traceback (most recent call last):
+  File "/teamspace/studios/this_studio/poolbench/scripts/run_model.py", line 1399, in <module>
+    main()
+  File "/teamspace/studios/this_studio/poolbench/scripts/run_model.py", line 1373, in main
+    model_results = run_model(model_name, args)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/teamspace/studios/this_studio/poolbench/scripts/run_model.py", line 1190, in run_model
+    auroc_summary = step_pool_and_auroc(
+                    ^^^^^^^^^^^^^^^^^^^^
+  File "/teamspace/studios/this_studio/poolbench/scripts/run_model.py", line 417, in step_pool_and_auroc
+    auroc_res = compute_all_train_test_auroc(
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/teamspace/studios/this_studio/poolbench/poolbench/evaluation/probe.py", line 326, in compute_all_train_test_auroc
+    with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as pool:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/concurrent/futures/thread.py", line 148, in __init__
+    raise ValueError("max_workers must be greater than 0")
+ValueError: max_workers must be greater than 0

@@ -1,0 +1,342 @@
+[13:25:56] [INF] [device] Using explicitly requested device: cpu
+[13:25:56] [INF] 
+============================================================
+[13:25:56] [INF]   MODEL: llama3_8b
+[13:25:56] [INF] ============================================================
+[13:25:56] [INF] 
+============================================================
+[13:25:56] [INF]   PoolBench pipeline starting: model=llama3_8b  device=cpu
+[13:25:56] [INF]   GPU on start: 0.0/85 GB (0%)
+[13:25:56] [INF] ============================================================
+[13:25:56] [INF] 
+=== Step 3: Linearity check — llama3_8b L24 ===  GPU: 0.0/85 GB (0%)
+[13:25:56] [INF]   [checkpoint] Step 3 already complete → /teamspace/studios/this_studio/poolbench/results/linearity/llama3_8b_linearity.json; skipping
+[13:25:56] [INF] 
+=== Step 2: Pool + AUROC — llama3_8b (C4_repe) ===  GPU: 0.0/85 GB (0%)
+[13:25:56] [INF] 
+  Layer 16  GPU: 0.0/85 GB (0%)
+[13:25:56] [INF]   [checkpoint] Step 2 layer 16: resuming 2/17 incomplete concepts (38 missing cells)
+[13:28:27] [INF]   [ITI probe 1/2] negation_density: N=1396 H=32 D=4096 feat=46.0s  total=123.9s  best_head_auroc=0.410
+[13:30:47] [INF]   [ITI probe 2/2] numerical_precision: N=1400 H=32 D=4096 feat=26.6s  total=139.9s  best_head_auroc=0.985
+[13:30:47] [INF]   [pool] S2 unigram vocab=33905  S3 ITI probes=2
+[13:30:47] [INF]   [pool] L16 concept 1/2: negation_density
+  S2 SIF: first PC subtracted across 1 concept×split pairs.
+  [WARN] L2_dependency_rel fallback rate 100.0% > 30% — strategy is effectively mean pooling
+  S2 SIF: first PC subtracted across 1 concept×split pairs.
+  [WARN] L2_dependency_rel fallback rate 100.0% > 30% — strategy is effectively mean pooling
+[13:34:30] [INF]   [pool] L16 concept 2/2: numerical_precision
+  S2 SIF: first PC subtracted across 1 concept×split pairs.
+  [WARN] L2_dependency_rel fallback rate 100.0% > 30% — strategy is effectively mean pooling
+  S2 SIF: first PC subtracted across 1 concept×split pairs.
+  [WARN] L2_dependency_rel fallback rate 100.0% > 30% — strategy is effectively mean pooling
+[13:37:18] [INF]   [pool cache] Saved → /teamspace/studios/this_studio/poolbench/results/pooled_cache/llama3_8b/layer_16_pooled.pkl
+[13:37:18] [INF]   [probe] Running 38 AUROC computations with 26 parallel workers
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+[13:37:25] [INF]   [probe] 1/38  negation_density_P2_first_token  AUROC=0.500  CI=[0.470,0.530]  std=0.0156  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[13:37:26] [INF]   [probe] 2/38  negation_density_A1_mean  AUROC=0.476  CI=[0.447,0.506]  std=0.0151  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[13:37:27] [INF]   [probe] 3/38  negation_density_S3_ITI_exact  AUROC=0.495  CI=[0.463,0.526]  std=0.0162  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[13:37:27] [INF]   [probe] 4/38  negation_density_L5_SVO  AUROC=0.478  CI=[0.450,0.509]  std=0.0152  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[13:37:27] [INF]   [probe] 5/38  numerical_precision_A3_random  AUROC=0.585  CI=[0.556,0.614]  std=0.0152  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:37:27] [INF]   [probe] 6/38  negation_density_W2_mean_last_8  AUROC=0.486  CI=[0.454,0.517]  std=0.0155  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[13:37:27] [INF]   [probe] 7/38  negation_density_P3_CLS  AUROC=0.492  CI=[0.462,0.521]  std=0.0152  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[13:37:27] [INF]   [probe] 8/38  negation_density_A2_max  AUROC=0.494  CI=[0.463,0.523]  std=0.0154  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[13:37:27] [INF]   [probe] 9/38  negation_density_L1_POS_filtered  AUROC=0.479  CI=[0.451,0.509]  std=0.0151  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[13:37:27] [INF]   [probe] 10/38  negation_density_A3_random  AUROC=0.477  CI=[0.449,0.507]  std=0.0152  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[13:37:27] [INF]   [probe] 11/38  numerical_precision_L3_named_entity  AUROC=0.679  CI=[0.649,0.709]  std=0.0158  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:37:27] [INF]   [probe] 12/38  negation_density_L2_dependency_rel  AUROC=0.476  CI=[0.447,0.506]  std=0.0151  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[13:37:27] [INF]   [probe] 13/38  numerical_precision_L2_dependency_rel  AUROC=0.688  CI=[0.658,0.717]  std=0.0157  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:37:27] [INF]   [probe] 14/38  negation_density_A4_norm  AUROC=0.476  CI=[0.447,0.505]  std=0.0151  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[13:37:28] [INF]   [probe] 15/38  negation_density_W1_mean_last_4  AUROC=0.484  CI=[0.456,0.514]  std=0.0153  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[13:37:28] [INF]   [probe] 16/38  negation_density_L4_subword_root  AUROC=0.478  CI=[0.450,0.508]  std=0.0151  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[13:37:28] [INF]   [probe] 17/38  negation_density_S2_SIF  AUROC=0.480  CI=[0.449,0.508]  std=0.0151  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[13:37:28] [INF]   [probe] 18/38  negation_density_P1_last_token  AUROC=0.493  CI=[0.460,0.523]  std=0.0153  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[13:37:28] [INF]   [probe] 19/38  negation_density_L3_named_entity  AUROC=0.475  CI=[0.445,0.504]  std=0.0150  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[13:37:28] [INF]   [probe] 20/38  numerical_precision_A4_norm  AUROC=0.688  CI=[0.657,0.717]  std=0.0157  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:37:28] [INF]   [probe] 21/38  negation_density_W3_mean_last_16  AUROC=0.484  CI=[0.453,0.514]  std=0.0154  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[13:37:28] [INF]   [probe] 22/38  negation_density_W4_hierarchical  AUROC=0.480  CI=[0.451,0.510]  std=0.0151  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+[13:37:28] [INF]   [probe] 23/38  numerical_precision_A2_max  AUROC=0.909  CI=[0.893,0.925]  std=0.0081  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:37:28] [INF]   [probe] 24/38  numerical_precision_L1_POS_filtered  AUROC=0.705  CI=[0.675,0.734]  std=0.0152  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:37:28] [INF]   [probe] 25/38  numerical_precision_A1_mean  AUROC=0.688  CI=[0.658,0.717]  std=0.0157  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:37:28] [INF]   [probe] 26/38  negation_density_S1_attention_weighted  AUROC=0.494  CI=[0.463,0.524]  std=0.0161  n_train_pos=699  n_train_neg=697  n_test_pos=300  n_test_neg=299
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+[13:37:31] [INF]   [probe] 27/38  numerical_precision_L4_subword_root  AUROC=0.697  CI=[0.666,0.726]  std=0.0154  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+[13:37:31] [INF]   [probe] 28/38  numerical_precision_P2_first_token  AUROC=0.500  CI=[0.469,0.530]  std=0.0152  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:37:31] [INF]   [probe] 29/38  numerical_precision_L5_SVO  AUROC=0.699  CI=[0.669,0.728]  std=0.0154  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:37:31] [INF]   [probe] 30/38  numerical_precision_S1_attention_weighted  AUROC=0.701  CI=[0.672,0.729]  std=0.0149  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:37:31] [INF]   [probe] 31/38  numerical_precision_S2_SIF  AUROC=0.599  CI=[0.569,0.627]  std=0.0152  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:37:31] [INF]   [probe] 32/38  numerical_precision_W2_mean_last_8  AUROC=0.685  CI=[0.655,0.715]  std=0.0151  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:37:31] [INF]   [probe] 33/38  numerical_precision_P3_CLS  AUROC=0.607  CI=[0.577,0.636]  std=0.0146  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:37:31] [INF]   [probe] 34/38  numerical_precision_W3_mean_last_16  AUROC=0.685  CI=[0.655,0.715]  std=0.0153  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:37:31] [INF]   [probe] 35/38  numerical_precision_P1_last_token  AUROC=0.692  CI=[0.663,0.722]  std=0.0151  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:37:31] [INF]   [probe] 36/38  numerical_precision_W1_mean_last_4  AUROC=0.674  CI=[0.645,0.704]  std=0.0149  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:37:32] [INF]   [probe] 37/38  numerical_precision_W4_hierarchical  AUROC=0.685  CI=[0.655,0.715]  std=0.0157  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:37:32] [INF]   [probe] 38/38  numerical_precision_S3_ITI_exact  AUROC=0.700  CI=[0.671,0.728]  std=0.0149  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:37:32] [INF]   [probe] Saved train/test AUROC results → /teamspace/studios/this_studio/poolbench/results/auroc/llama3_8b/C4_repe/layer_16/llama3_8b_auroc_results.json
+[13:37:32] [INF]   [checkpoint] Layer 16 saved → /teamspace/studios/this_studio/poolbench/results/auroc/llama3_8b/C4_repe/layer_16/llama3_8b_auroc_results.json
+[13:37:32] [INF] 
+  Layer 24  GPU: 0.0/85 GB (0%)
+[13:37:32] [INF]   [checkpoint] Step 2 layer 24: resuming 1/17 incomplete concepts (19 missing cells)
+[13:39:05] [INF]   [ITI probe 1/1] numerical_precision: N=1400 H=32 D=4096 feat=21.1s  total=77.9s  best_head_auroc=0.989
+[13:39:05] [INF]   [pool] S2 unigram vocab=29915  S3 ITI probes=1
+[13:39:05] [INF]   [pool] L24 concept 1/1: numerical_precision
+  S2 SIF: first PC subtracted across 1 concept×split pairs.
+  [WARN] L2_dependency_rel fallback rate 100.0% > 30% — strategy is effectively mean pooling
+  S2 SIF: first PC subtracted across 1 concept×split pairs.
+  [WARN] L2_dependency_rel fallback rate 100.0% > 30% — strategy is effectively mean pooling
+[13:41:29] [INF]   [pool cache] Saved → /teamspace/studios/this_studio/poolbench/results/pooled_cache/llama3_8b/layer_24_pooled.pkl
+[13:41:29] [INF]   [probe] Running 19 AUROC computations with 19 parallel workers
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+[13:41:33] [INF]   [probe] 1/19  numerical_precision_P2_first_token  AUROC=0.500  CI=[0.469,0.530]  std=0.0152  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:41:35] [INF]   [probe] 2/19  numerical_precision_L4_subword_root  AUROC=0.704  CI=[0.673,0.734]  std=0.0156  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:41:35] [INF]   [probe] 3/19  numerical_precision_P3_CLS  AUROC=0.562  CI=[0.534,0.591]  std=0.0146  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:41:35] [INF]   [probe] 4/19  numerical_precision_L3_named_entity  AUROC=0.677  CI=[0.646,0.707]  std=0.0157  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:41:35] [INF]   [probe] 5/19  numerical_precision_P1_last_token  AUROC=0.689  CI=[0.659,0.719]  std=0.0152  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:41:35] [INF]   [probe] 6/19  numerical_precision_S1_attention_weighted  AUROC=0.746  CI=[0.719,0.772]  std=0.0134  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:41:35] [INF]   [probe] 7/19  numerical_precision_L2_dependency_rel  AUROC=0.699  CI=[0.668,0.729]  std=0.0156  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:41:35] [INF]   [probe] 8/19  numerical_precision_W4_hierarchical  AUROC=0.693  CI=[0.662,0.722]  std=0.0157  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:41:35] [INF]   [probe] 9/19  numerical_precision_S2_SIF  AUROC=0.607  CI=[0.578,0.635]  std=0.0150  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:41:35] [INF]   [probe] 10/19  numerical_precision_L1_POS_filtered  AUROC=0.705  CI=[0.674,0.735]  std=0.0157  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:41:35] [INF]   [probe] 11/19  numerical_precision_S3_ITI_exact  AUROC=0.780  CI=[0.753,0.805]  std=0.0132  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:41:35] [INF]   [probe] 12/19  numerical_precision_L5_SVO  AUROC=0.700  CI=[0.669,0.730]  std=0.0157  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:41:35] [INF]   [probe] 13/19  numerical_precision_W1_mean_last_4  AUROC=0.665  CI=[0.635,0.695]  std=0.0155  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:41:35] [INF]   [probe] 14/19  numerical_precision_A4_norm  AUROC=0.699  CI=[0.668,0.728]  std=0.0156  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:41:35] [INF]   [probe] 15/19  numerical_precision_W3_mean_last_16  AUROC=0.688  CI=[0.657,0.719]  std=0.0158  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:41:35] [INF]   [probe] 16/19  numerical_precision_A1_mean  AUROC=0.699  CI=[0.668,0.729]  std=0.0156  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:41:35] [INF]   [probe] 17/19  numerical_precision_A2_max  AUROC=0.912  CI=[0.897,0.928]  std=0.0080  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:41:35] [INF]   [probe] 18/19  numerical_precision_A3_random  AUROC=0.699  CI=[0.668,0.728]  std=0.0156  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:41:35] [INF]   [probe] 19/19  numerical_precision_W2_mean_last_8  AUROC=0.689  CI=[0.658,0.717]  std=0.0154  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[13:41:35] [INF]   [probe] Saved train/test AUROC results → /teamspace/studios/this_studio/poolbench/results/auroc/llama3_8b/C4_repe/layer_24/llama3_8b_auroc_results.json
+[13:41:35] [INF]   [checkpoint] Layer 24 saved → /teamspace/studios/this_studio/poolbench/results/auroc/llama3_8b/C4_repe/layer_24/llama3_8b_auroc_results.json
+[13:41:35] [INF] 
+  Layer 31  GPU: 0.0/85 GB (0%)
+[13:41:35] [INF]   [checkpoint] Step 2 layer 31: resuming 4/17 incomplete concepts (76 missing cells)
+[13:42:58] [INF]   [ITI probe 1/4] legal_formality: N=1388 H=32 D=4096 feat=19.5s  total=56.3s  best_head_auroc=0.570
+[13:46:25] [INF]   [ITI probe 2/4] contrast: N=1394 H=32 D=4096 feat=17.2s  total=207.3s  best_head_auroc=0.432
+[13:48:36] [INF]   [ITI probe 3/4] planning: N=1400 H=32 D=4096 feat=41.0s  total=131.0s  best_head_auroc=1.000
+[13:54:50] [INF]   [ITI probe 4/4] numerical_precision: N=1400 H=32 D=4096 feat=56.0s  total=374.0s  best_head_auroc=0.997
+[13:54:50] [INF]   [pool] S2 unigram vocab=40727  S3 ITI probes=4
+[13:54:50] [INF]   [pool] L31 concept 1/4: legal_formality
+  S2 SIF: first PC subtracted across 1 concept×split pairs.
+  [WARN] L2_dependency_rel fallback rate 100.0% > 30% — strategy is effectively mean pooling
+  S2 SIF: first PC subtracted across 1 concept×split pairs.
+  [WARN] L2_dependency_rel fallback rate 100.0% > 30% — strategy is effectively mean pooling
+[13:58:32] [INF]   [pool] L31 concept 2/4: contrast
+  S2 SIF: first PC subtracted across 1 concept×split pairs.
+  [WARN] L2_dependency_rel fallback rate 100.0% > 30% — strategy is effectively mean pooling
+  S2 SIF: first PC subtracted across 1 concept×split pairs.
+  [WARN] L2_dependency_rel fallback rate 100.0% > 30% — strategy is effectively mean pooling
+[14:05:48] [INF]   [pool] L31 concept 3/4: planning
+  S2 SIF: first PC subtracted across 1 concept×split pairs.
+  [WARN] L2_dependency_rel fallback rate 100.0% > 30% — strategy is effectively mean pooling
+  S2 SIF: first PC subtracted across 1 concept×split pairs.
+  [WARN] L2_dependency_rel fallback rate 100.0% > 30% — strategy is effectively mean pooling
+[14:12:50] [INF]   [pool] L31 concept 4/4: numerical_precision
+  S2 SIF: first PC subtracted across 1 concept×split pairs.
+  [WARN] L2_dependency_rel fallback rate 100.0% > 30% — strategy is effectively mean pooling
+  S2 SIF: first PC subtracted across 1 concept×split pairs.
+  [WARN] L2_dependency_rel fallback rate 100.0% > 30% — strategy is effectively mean pooling
+[14:18:36] [INF]   [pool cache] Saved → /teamspace/studios/this_studio/poolbench/results/pooled_cache/llama3_8b/layer_31_pooled.pkl
+[14:18:36] [INF]   [probe] Running 76 AUROC computations with 26 parallel workers
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+[14:19:30] [INF]   [probe] 1/76  contrast_A2_max  AUROC=0.483  CI=[0.455,0.512]  std=0.0148  n_train_pos=698  n_train_neg=696  n_test_pos=299  n_test_neg=299
+[14:19:31] [INF]   [probe] 2/76  contrast_W2_mean_last_8  AUROC=0.480  CI=[0.450,0.512]  std=0.0158  n_train_pos=698  n_train_neg=696  n_test_pos=299  n_test_neg=299
+[14:19:31] [INF]   [probe] 3/76  contrast_S2_SIF  AUROC=0.482  CI=[0.450,0.511]  std=0.0154  n_train_pos=698  n_train_neg=696  n_test_pos=299  n_test_neg=299
+[14:19:32] [INF]   [probe] 4/76  contrast_A3_random  AUROC=0.473  CI=[0.442,0.505]  std=0.0160  n_train_pos=698  n_train_neg=696  n_test_pos=299  n_test_neg=299
+[14:19:32] [INF]   [probe] 5/76  contrast_L1_POS_filtered  AUROC=0.475  CI=[0.444,0.508]  std=0.0160  n_train_pos=698  n_train_neg=696  n_test_pos=299  n_test_neg=299
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+[14:19:33] [INF]   [probe] 6/76  contrast_A1_mean  AUROC=0.473  CI=[0.442,0.505]  std=0.0160  n_train_pos=698  n_train_neg=696  n_test_pos=299  n_test_neg=299
+[14:19:35] [INF]   [probe] 7/76  contrast_W4_hierarchical  AUROC=0.489  CI=[0.459,0.519]  std=0.0149  n_train_pos=698  n_train_neg=696  n_test_pos=299  n_test_neg=299
+[14:19:35] [INF]   [probe] 8/76  contrast_L4_subword_root  AUROC=0.473  CI=[0.442,0.505]  std=0.0160  n_train_pos=698  n_train_neg=696  n_test_pos=299  n_test_neg=299
+[14:19:35] [INF]   [probe] 9/76  contrast_P1_last_token  AUROC=0.495  CI=[0.465,0.524]  std=0.0150  n_train_pos=698  n_train_neg=696  n_test_pos=299  n_test_neg=299
+[14:19:36] [INF]   [probe] 10/76  contrast_A4_norm  AUROC=0.474  CI=[0.442,0.506]  std=0.0160  n_train_pos=698  n_train_neg=696  n_test_pos=299  n_test_neg=299
+[14:19:36] [INF]   [probe] 11/76  contrast_S3_ITI_exact  AUROC=0.476  CI=[0.444,0.507]  std=0.0158  n_train_pos=698  n_train_neg=696  n_test_pos=299  n_test_neg=299
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+[14:19:38] [INF]   [probe] 12/76  contrast_W3_mean_last_16  AUROC=0.476  CI=[0.446,0.508]  std=0.0158  n_train_pos=698  n_train_neg=696  n_test_pos=299  n_test_neg=299
+[14:19:38] [INF]   [probe] 13/76  contrast_L5_SVO  AUROC=0.479  CI=[0.450,0.509]  std=0.0153  n_train_pos=698  n_train_neg=696  n_test_pos=299  n_test_neg=299
+[14:19:38] [INF]   [probe] 14/76  contrast_L3_named_entity  AUROC=0.470  CI=[0.440,0.500]  std=0.0153  n_train_pos=698  n_train_neg=696  n_test_pos=299  n_test_neg=299
+[14:19:38] [INF]   [probe] 15/76  legal_formality_L3_named_entity  AUROC=0.488  CI=[0.460,0.516]  std=0.0147  n_train_pos=699  n_train_neg=689  n_test_pos=299  n_test_neg=296
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+[14:19:38] [INF]   [probe] 16/76  legal_formality_A2_max  AUROC=0.463  CI=[0.433,0.496]  std=0.0160  n_train_pos=699  n_train_neg=689  n_test_pos=299  n_test_neg=296
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+[14:19:39] [INF]   [probe] 17/76  legal_formality_A1_mean  AUROC=0.488  CI=[0.458,0.519]  std=0.0150  n_train_pos=699  n_train_neg=689  n_test_pos=299  n_test_neg=296
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+[14:19:39] [INF]   [probe] 18/76  legal_formality_A3_random  AUROC=0.494  CI=[0.465,0.525]  std=0.0152  n_train_pos=699  n_train_neg=689  n_test_pos=299  n_test_neg=296
+[14:19:39] [INF]   [probe] 19/76  legal_formality_L2_dependency_rel  AUROC=0.488  CI=[0.458,0.519]  std=0.0150  n_train_pos=699  n_train_neg=689  n_test_pos=299  n_test_neg=296
+[14:19:40] [INF]   [probe] 20/76  legal_formality_L1_POS_filtered  AUROC=0.493  CI=[0.463,0.522]  std=0.0150  n_train_pos=699  n_train_neg=689  n_test_pos=299  n_test_neg=296
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+[14:19:44] [INF]   [probe] 21/76  legal_formality_P2_first_token  AUROC=0.500  CI=[0.470,0.532]  std=0.0157  n_train_pos=699  n_train_neg=689  n_test_pos=299  n_test_neg=296
+[14:19:44] [INF]   [probe] 22/76  contrast_W1_mean_last_4  AUROC=0.478  CI=[0.448,0.510]  std=0.0158  n_train_pos=698  n_train_neg=696  n_test_pos=299  n_test_neg=299
+[14:19:46] [INF]   [probe] 23/76  legal_formality_L4_subword_root  AUROC=0.484  CI=[0.455,0.515]  std=0.0155  n_train_pos=699  n_train_neg=689  n_test_pos=299  n_test_neg=296
+[14:19:46] [INF]   [probe] 24/76  legal_formality_A4_norm  AUROC=0.489  CI=[0.460,0.520]  std=0.0150  n_train_pos=699  n_train_neg=689  n_test_pos=299  n_test_neg=296
+[14:19:46] [INF]   [probe] 25/76  contrast_L2_dependency_rel  AUROC=0.473  CI=[0.442,0.505]  std=0.0160  n_train_pos=698  n_train_neg=696  n_test_pos=299  n_test_neg=299
+[14:19:46] [INF]   [probe] 26/76  legal_formality_P3_CLS  AUROC=0.479  CI=[0.448,0.510]  std=0.0159  n_train_pos=699  n_train_neg=689  n_test_pos=299  n_test_neg=296
+[14:19:46] [INF]   [probe] 27/76  contrast_S1_attention_weighted  AUROC=0.477  CI=[0.445,0.508]  std=0.0158  n_train_pos=698  n_train_neg=696  n_test_pos=299  n_test_neg=299
+[14:19:46] [INF]   [probe] 28/76  legal_formality_S1_attention_weighted  AUROC=0.486  CI=[0.456,0.517]  std=0.0154  n_train_pos=699  n_train_neg=689  n_test_pos=299  n_test_neg=296
+[14:19:46] [INF]   [probe] 29/76  legal_formality_L5_SVO  AUROC=0.486  CI=[0.456,0.515]  std=0.0153  n_train_pos=699  n_train_neg=689  n_test_pos=299  n_test_neg=296
+[14:19:46] [INF]   [probe] 30/76  contrast_P3_CLS  AUROC=0.466  CI=[0.437,0.494]  std=0.0151  n_train_pos=698  n_train_neg=696  n_test_pos=299  n_test_neg=299
+[14:19:47] [INF]   [probe] 31/76  legal_formality_P1_last_token  AUROC=0.483  CI=[0.455,0.515]  std=0.0151  n_train_pos=699  n_train_neg=689  n_test_pos=299  n_test_neg=296
+[14:19:47] [INF]   [probe] 32/76  legal_formality_S2_SIF  AUROC=0.445  CI=[0.414,0.475]  std=0.0156  n_train_pos=699  n_train_neg=689  n_test_pos=299  n_test_neg=296
+[14:19:47] [INF]   [probe] 33/76  legal_formality_S3_ITI_exact  AUROC=0.487  CI=[0.456,0.517]  std=0.0157  n_train_pos=699  n_train_neg=689  n_test_pos=299  n_test_neg=296
+[14:19:47] [INF]   [probe] 34/76  contrast_P2_first_token  AUROC=0.500  CI=[0.471,0.530]  std=0.0151  n_train_pos=698  n_train_neg=696  n_test_pos=299  n_test_neg=299
+[14:19:48] [INF]   [probe] 35/76  legal_formality_W3_mean_last_16  AUROC=0.475  CI=[0.445,0.503]  std=0.0151  n_train_pos=699  n_train_neg=689  n_test_pos=299  n_test_neg=296
+[14:19:48] [INF]   [probe] 36/76  legal_formality_W2_mean_last_8  AUROC=0.478  CI=[0.448,0.507]  std=0.0149  n_train_pos=699  n_train_neg=689  n_test_pos=299  n_test_neg=296
+[14:19:48] [INF]   [probe] 37/76  legal_formality_W1_mean_last_4  AUROC=0.481  CI=[0.450,0.510]  std=0.0150  n_train_pos=699  n_train_neg=689  n_test_pos=299  n_test_neg=296
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+[14:19:49] [INF]   [probe] 38/76  numerical_precision_A2_max  AUROC=0.938  CI=[0.923,0.950]  std=0.0071  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:19:49] [INF]   [probe] 39/76  numerical_precision_A1_mean  AUROC=0.703  CI=[0.673,0.733]  std=0.0154  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+[14:19:50] [INF]   [probe] 40/76  legal_formality_W4_hierarchical  AUROC=0.479  CI=[0.451,0.510]  std=0.0153  n_train_pos=699  n_train_neg=689  n_test_pos=299  n_test_neg=296
+[14:19:50] [INF]   [probe] 41/76  numerical_precision_A3_random  AUROC=0.703  CI=[0.673,0.733]  std=0.0154  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:19:50] [INF]   [probe] 42/76  numerical_precision_A4_norm  AUROC=0.697  CI=[0.667,0.727]  std=0.0156  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:19:52] [INF]   [probe] 43/76  numerical_precision_L3_named_entity  AUROC=0.707  CI=[0.678,0.736]  std=0.0150  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:19:53] [INF]   [probe] 44/76  numerical_precision_L2_dependency_rel  AUROC=0.703  CI=[0.673,0.733]  std=0.0154  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:19:58] [INF]   [probe] 45/76  numerical_precision_L1_POS_filtered  AUROC=0.694  CI=[0.663,0.725]  std=0.0156  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+[14:19:58] [INF]   [probe] 46/76  numerical_precision_L4_subword_root  AUROC=0.698  CI=[0.667,0.727]  std=0.0157  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+[14:20:15] [INF]   [probe] 47/76  numerical_precision_L5_SVO  AUROC=0.688  CI=[0.658,0.719]  std=0.0159  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+[14:20:17] [INF]   [probe] 48/76  numerical_precision_P2_first_token  AUROC=0.500  CI=[0.469,0.530]  std=0.0152  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:20:17] [INF]   [probe] 49/76  numerical_precision_P1_last_token  AUROC=0.691  CI=[0.663,0.720]  std=0.0148  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:20:17] [INF]   [probe] 50/76  numerical_precision_P3_CLS  AUROC=0.535  CI=[0.505,0.563]  std=0.0153  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:20:17] [INF]   [probe] 51/76  numerical_precision_S2_SIF  AUROC=0.569  CI=[0.539,0.598]  std=0.0152  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:20:17] [INF]   [probe] 52/76  numerical_precision_W1_mean_last_4  AUROC=0.724  CI=[0.698,0.749]  std=0.0135  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:20:18] [INF]   [probe] 53/76  numerical_precision_W2_mean_last_8  AUROC=0.731  CI=[0.704,0.758]  std=0.0140  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:20:18] [INF]   [probe] 54/76  planning_A1_mean  AUROC=0.582  CI=[0.545,0.614]  std=0.0170  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=267
+[14:20:18] [INF]   [probe] 55/76  numerical_precision_S3_ITI_exact  AUROC=0.851  CI=[0.831,0.870]  std=0.0104  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:20:18] [INF]   [probe] 56/76  numerical_precision_S1_attention_weighted  AUROC=0.913  CI=[0.898,0.927]  std=0.0074  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:20:19] [INF]   [probe] 57/76  numerical_precision_W3_mean_last_16  AUROC=0.679  CI=[0.648,0.710]  std=0.0162  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+[14:20:19] [INF]   [probe] 58/76  numerical_precision_W4_hierarchical  AUROC=0.704  CI=[0.674,0.733]  std=0.0153  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=300
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+[14:20:26] [INF]   [probe] 59/76  planning_A3_random  AUROC=0.583  CI=[0.547,0.615]  std=0.0170  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=267
+[14:20:29] [INF]   [probe] 60/76  planning_A2_max  AUROC=0.696  CI=[0.669,0.723]  std=0.0142  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=267
+[14:20:30] [INF]   [probe] 61/76  planning_L1_POS_filtered  AUROC=0.531  CI=[0.495,0.564]  std=0.0180  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=267
+[14:20:33] [INF]   [probe] 62/76  planning_L2_dependency_rel  AUROC=0.582  CI=[0.545,0.614]  std=0.0170  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=267
+[14:20:34] [INF]   [probe] 63/76  planning_A4_norm  AUROC=0.582  CI=[0.546,0.614]  std=0.0171  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=267
+[14:20:34] [INF]   [probe] 64/76  planning_L3_named_entity  AUROC=0.468  CI=[0.436,0.499]  std=0.0161  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=267
+/home/zeus/miniconda3/envs/cloudspace/lib/python3.12/site-packages/sklearn/decomposition/_pca.py:685: RuntimeWarning: invalid value encountered in divide
+  self.explained_variance_ratio_ = self.explained_variance_ / total_var
+[14:20:35] [INF]   [probe] 65/76  planning_L4_subword_root  AUROC=0.561  CI=[0.526,0.593]  std=0.0173  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=267
+[14:20:35] [INF]   [probe] 66/76  planning_L5_SVO  AUROC=0.509  CI=[0.478,0.540]  std=0.0164  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=267
+[14:20:35] [INF]   [probe] 67/76  planning_P2_first_token  AUROC=0.500  CI=[0.469,0.530]  std=0.0152  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=267
+[14:20:35] [INF]   [probe] 68/76  planning_P1_last_token  AUROC=0.616  CI=[0.581,0.649]  std=0.0176  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=267
+[14:20:35] [INF]   [probe] 69/76  planning_P3_CLS  AUROC=0.810  CI=[0.779,0.839]  std=0.0148  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=267
+[14:20:36] [INF]   [probe] 70/76  planning_S1_attention_weighted  AUROC=0.653  CI=[0.624,0.681]  std=0.0148  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=267
+[14:20:36] [INF]   [probe] 71/76  planning_S3_ITI_exact  AUROC=0.639  CI=[0.609,0.668]  std=0.0152  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=267
+[14:20:36] [INF]   [probe] 72/76  planning_S2_SIF  AUROC=0.570  CI=[0.541,0.602]  std=0.0159  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=267
+[14:20:37] [INF]   [probe] 73/76  planning_W2_mean_last_8  AUROC=0.530  CI=[0.494,0.563]  std=0.0177  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=267
+[14:20:37] [INF]   [probe] 74/76  planning_W3_mean_last_16  AUROC=0.550  CI=[0.512,0.582]  std=0.0177  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=267
+[14:20:37] [INF]   [probe] 75/76  planning_W1_mean_last_4  AUROC=0.533  CI=[0.498,0.569]  std=0.0179  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=267
+[14:20:37] [INF]   [probe] 76/76  planning_W4_hierarchical  AUROC=0.563  CI=[0.528,0.595]  std=0.0172  n_train_pos=700  n_train_neg=700  n_test_pos=300  n_test_neg=267
+[14:20:37] [INF]   [probe] Saved train/test AUROC results → /teamspace/studios/this_studio/poolbench/results/auroc/llama3_8b/C4_repe/layer_31/llama3_8b_auroc_results.json
+[14:20:37] [INF]   [checkpoint] Layer 31 saved → /teamspace/studios/this_studio/poolbench/results/auroc/llama3_8b/C4_repe/layer_31/llama3_8b_auroc_results.json
+[14:20:37] [INF]   [pool] aggregate fallback rates saved → /teamspace/studios/this_studio/poolbench/results/auroc/llama3_8b/C4_repe/fallback_rates.json
+[14:20:37] [INF]   [layer-select] L16: mean AUROC=0.5983 over concepts=['hedging', 'imdb_sentiment', 'causation', 'academic_tone', 'planning'] strategies=['A1_mean', 'P1_last_token', 'A2_max']
+[14:20:37] [INF]   [layer-select] L24: mean AUROC=0.5757 over concepts=['hedging', 'imdb_sentiment', 'causation', 'academic_tone', 'planning'] strategies=['A1_mean', 'P1_last_token', 'A2_max']
+[14:20:37] [INF]   [layer-select] L31: mean AUROC=0.5693 over concepts=['hedging', 'imdb_sentiment', 'causation', 'academic_tone', 'planning'] strategies=['A1_mean', 'P1_last_token', 'A2_max']
+[14:20:37] [INF] 
+  Best layer (methodology mean over representative concepts × mean/last/max): 16
+[14:20:38] [WRN]   [sv] No A1_mean cache entry for hedging — skipping
+[14:20:38] [WRN]   [sv] No A1_mean cache entry for legal_formality — skipping
+[14:20:38] [WRN]   [sv] No A1_mean cache entry for frustration — skipping
+[14:20:38] [WRN]   [sv] No A1_mean cache entry for imdb_sentiment — skipping
+[14:20:38] [WRN]   [sv] No A1_mean cache entry for toxicity — skipping
+[14:20:38] [WRN]   [sv] No A1_mean cache entry for depression — skipping
+[14:20:38] [WRN]   [sv] No A1_mean cache entry for causation — skipping
+[14:20:38] [WRN]   [sv] No A1_mean cache entry for contrast — skipping
+[14:20:38] [WRN]   [sv] No A1_mean cache entry for conditionality — skipping
+[14:20:38] [WRN]   [sv] No A1_mean cache entry for academic_tone — skipping
+[14:20:38] [WRN]   [sv] No A1_mean cache entry for code_docs — skipping
+[14:20:38] [WRN]   [sv] No A1_mean cache entry for bureaucratic — skipping
+[14:20:38] [WRN]   [sv] No A1_mean cache entry for narrative — skipping
+[14:20:38] [WRN]   [sv] No A1_mean cache entry for deference — skipping
+[14:20:38] [WRN]   [sv] No A1_mean cache entry for planning — skipping
+[14:20:38] [INF]   [sv] C4_repe/llama3_8b/layer_16: 2 saved, 0 already existed
+[14:20:52] [INF]   Best layer selected: 16
+[14:20:52] [INF] 
+=== Step 4: ICC computation — llama3_8b ===  GPU: 0.0/85 GB (0%)
+[14:20:52] [INF]   [checkpoint] Step 4 already complete → /teamspace/studios/this_studio/poolbench/results/icc/llama3_8b_icc.json; skipping
+[14:20:52] [INF] 
+=== Step 4b: Keyword ablation — llama3_8b L16 ===  GPU: 0.0/85 GB (0%)
+[14:20:52] [INF]   [checkpoint] Step 4b already complete → /teamspace/studios/this_studio/poolbench/results/ablation/llama3_8b_keyword_ablation.json; skipping
+[14:20:52] [INF] 
+  ✓ Pipeline complete: llama3_8b  total=3296s  GPU: 0.0/85 GB (0%)
+[14:20:56] [INF] 
+[layer_rank_corr] Running layer rank correlation analysis...
+
+Model                  Layer pair       Spearman ρ      p-value   n_keys
+------------------------------------------------------------------------
+gemma2_9b              L14 vs L28           0.9878  1.9213e-261      323
+gemma2_9b              L14 vs L41           0.9611  2.2560e-181      323
+gemma2_9b              L28 vs L41           0.9679  1.5095e-194      323
+  → P1_last_token highest at best layer? NO — best=W4_hierarchical (0.784); P1_last_token=0.764
+
+llama3_8b              L16 vs L24           0.9895  5.2697e-272      323
+llama3_8b              L16 vs L31           0.9658  2.7994e-190      323
+llama3_8b              L24 vs L31           0.9760  1.1691e-214      323
+  → P1_last_token highest at best layer? NO — best=W4_hierarchical (0.780); P1_last_token=0.777
+
+mistral_7b             L08 vs L16           0.9867  2.3972e-255      323
+mistral_7b             L08 vs L24           0.9826  6.6379e-237      323
+mistral_7b             L16 vs L24           0.9894  2.6941e-271      323
+  → P1_last_token highest at best layer? NO — best=S3_ITI_exact (0.776); P1_last_token=0.751
+
+/teamspace/studios/this_studio/poolbench/scripts/layer_rank_correlation.py:222: UserWarning: This figure includes Axes that are not compatible with tight_layout, so results might be incorrect.
+  plt.tight_layout()
+
+Heatmap saved → /teamspace/studios/this_studio/poolbench/results/layer_rank_correlation.png
+Results saved → /teamspace/studios/this_studio/poolbench/results/layer_rank_correlation.json
+[14:20:58] [INF] 
+All models done.
