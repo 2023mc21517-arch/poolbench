@@ -85,7 +85,8 @@ def _run(cmd: list[str], dry_run: bool, capture: bool = False) -> str:
         return ""
     result = subprocess.run(cmd, cwd=str(BASE_DIR), capture_output=capture, text=True)
     if result.returncode != 0:
-        print(f"  ERROR: {result.stderr.strip()}", file=sys.stderr)
+        stderr = (result.stderr or "").strip()
+        print(f"  ERROR: {stderr}", file=sys.stderr)
         sys.exit(result.returncode)
     return result.stdout.strip() if capture else ""
 
@@ -125,6 +126,19 @@ def main() -> None:
         print(f"  {f}")
 
     print()
+
+    # Ensure git identity is set (required on fresh Lightning machines)
+    if not args.dry_run:
+        for cfg_key, cfg_val in [("user.email", "poolbench@research.local"),
+                                  ("user.name", "PoolBench")]:
+            result = subprocess.run(
+                ["git", "config", cfg_key],
+                cwd=str(BASE_DIR), capture_output=True, text=True
+            )
+            if not result.stdout.strip():
+                subprocess.run(["git", "config", cfg_key, cfg_val],
+                               cwd=str(BASE_DIR))
+                print(f"  [git config] set {cfg_key} = {cfg_val}")
 
     # git add --force (bypasses .gitignore for these specific files)
     _run(["git", "add", "--force"] + files_to_add, dry_run=args.dry_run)
