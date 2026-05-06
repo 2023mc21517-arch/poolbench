@@ -46,6 +46,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import pickle
 import time
 from pathlib import Path
 
@@ -288,12 +289,13 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
     log.info(f"\n=== Step 2: Pool + AUROC — {model_name} ({construction_method}) ===  GPU: {gpu_mem_str()}")
     concepts_to_run = {k: v for k, v in CONCEPTS.items()
                        if concept_filter is None or k == concept_filter}
+    _is_primary = (construction_method == DEFAULT_CONSTRUCTION)
     expected_keys = [f"{concept}_{strategy}" for concept in concepts_to_run for strategy in RANKED_STRATEGIES]
 
     # C1 writes directly under AUROC_DIR/{model}.  C2-C5 write under a sub-folder
     # named after the construction method so C1 checkpoints are never touched.
-    _is_primary = (construction_method == DEFAULT_CONSTRUCTION)
     _auroc_model_dir = AUROC_DIR / model_name if _is_primary else AUROC_DIR / model_name / construction_method
+    _pool_cache_dir  = RESULTS_DIR / "pooled_cache" / model_name
 
     primary_out = _auroc_model_dir / "best_layer_auroc.json"
     existing_summary = _safe_load_json(primary_out) if skip_existing else None
@@ -335,44 +337,64 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
                 continue
             log.info(f"  [checkpoint] Step 2 layer {layer_idx} missing {len(missing)} AUROC cells — recomputing layer")
 
-        unigram_probs = build_unigram_probs_from_activations(layer_act_dir, concepts_to_run, partition="train")
-        concept_probes = build_iti_concept_probes(layer_act_dir, concepts_to_run, partition="train", device=device)
-        log.info(f"  [pool] S2 unigram vocab={len(unigram_probs)}  S3 ITI probes={len(concept_probes)}")
+        # ── Pooled-vector cache ────────────────────────────────────────────
+        # C1 computes and saves the full pooled arrays to disk so C2-C5 can
+        # skip all pooling/ITI-probe work and just load the cache.
+        _layer_cache_path = _pool_cache_dir / f"layer_{layer_idx}_pooled.pkl"
+        _cache_hit = (not _is_primary) and _layer_cache_path.exists()
 
-        # Build pooled_results: {concept_strategy: {pos_pooled, neg_pooled}}
-        train_pooled_results: dict = {}
-        test_pooled_results: dict = {}
-        n_concepts_to_run = len(concepts_to_run)
-        for concept_i, concept_name in enumerate(concepts_to_run, 1):
-            log.info(f"  [pool] L{layer_idx} concept {concept_i}/{n_concepts_to_run}: {concept_name}")
-            # Verify files exist without loading them (compute_all_pooling_strategies reloads from disk)
-            for _part in ("train", "test"):
-                for _split in ("pos", "neg"):
-                    _p = layer_act_dir / f"{concept_name}_{_part}_{_split}.npy"
-                    if not _p.exists():
-                        raise RuntimeError(f"[pool] {concept_name} L{layer_idx}: missing {_p.name}")
-            # Apply all pooling strategies
-            concept_dict = {concept_name: concepts_to_run[concept_name]}
-            train_layer_pooled = compute_all_pooling_strategies(
-                act_dir       = layer_act_dir,
-                concepts      = concept_dict,
-                tokenizer_name= cfg["hf_id"],
-                unigram_probs = unigram_probs,
-                concept_probes= concept_probes,
-                partition     = "train",
-                fallback_accumulator = fallback_accumulator,
-            )
-            test_layer_pooled = compute_all_pooling_strategies(
-                act_dir       = layer_act_dir,
-                concepts      = concept_dict,
-                tokenizer_name= cfg["hf_id"],
-                unigram_probs = unigram_probs,
-                concept_probes= concept_probes,
-                partition     = "test",
-                fallback_accumulator = fallback_accumulator,
-            )
-            train_pooled_results.update(train_layer_pooled)
-            test_pooled_results.update(test_layer_pooled)
+        if _cache_hit:
+            log.info(f"  [pool cache] Loading pre-computed pooled vectors from {_layer_cache_path}")
+            with open(_layer_cache_path, "rb") as _f:
+                _cached = pickle.load(_f)
+            train_pooled_results = _cached["train"]
+            test_pooled_results  = _cached["test"]
+        else:
+            unigram_probs = build_unigram_probs_from_activations(layer_act_dir, concepts_to_run, partition="train")
+            concept_probes = build_iti_concept_probes(layer_act_dir, concepts_to_run, partition="train", device=device)
+            log.info(f"  [pool] S2 unigram vocab={len(unigram_probs)}  S3 ITI probes={len(concept_probes)}")
+
+            # Build pooled_results: {concept_strategy: {pos_pooled, neg_pooled}}
+            train_pooled_results: dict = {}
+            test_pooled_results: dict = {}
+            n_concepts_to_run = len(concepts_to_run)
+            for concept_i, concept_name in enumerate(concepts_to_run, 1):
+                log.info(f"  [pool] L{layer_idx} concept {concept_i}/{n_concepts_to_run}: {concept_name}")
+                # Verify files exist without loading them (compute_all_pooling_strategies reloads from disk)
+                for _part in ("train", "test"):
+                    for _split in ("pos", "neg"):
+                        _p = layer_act_dir / f"{concept_name}_{_part}_{_split}.npy"
+                        if not _p.exists():
+                            raise RuntimeError(f"[pool] {concept_name} L{layer_idx}: missing {_p.name}")
+                # Apply all pooling strategies
+                concept_dict = {concept_name: concepts_to_run[concept_name]}
+                train_layer_pooled = compute_all_pooling_strategies(
+                    act_dir       = layer_act_dir,
+                    concepts      = concept_dict,
+                    tokenizer_name= cfg["hf_id"],
+                    unigram_probs = unigram_probs,
+                    concept_probes= concept_probes,
+                    partition     = "train",
+                    fallback_accumulator = fallback_accumulator,
+                )
+                test_layer_pooled = compute_all_pooling_strategies(
+                    act_dir       = layer_act_dir,
+                    concepts      = concept_dict,
+                    tokenizer_name= cfg["hf_id"],
+                    unigram_probs = unigram_probs,
+                    concept_probes= concept_probes,
+                    partition     = "test",
+                    fallback_accumulator = fallback_accumulator,
+                )
+                train_pooled_results.update(train_layer_pooled)
+                test_pooled_results.update(test_layer_pooled)
+
+            # Save cache for C2-C5 reuse (only from C1, only when all concepts run)
+            if _is_primary and concept_filter is None:
+                _pool_cache_dir.mkdir(parents=True, exist_ok=True)
+                with open(_layer_cache_path, "wb") as _f:
+                    pickle.dump({"train": train_pooled_results, "test": test_pooled_results}, _f)
+                log.info(f"  [pool cache] Saved → {_layer_cache_path}")
 
         auroc_res = compute_all_train_test_auroc(
             train_pooled_results = train_pooled_results,
