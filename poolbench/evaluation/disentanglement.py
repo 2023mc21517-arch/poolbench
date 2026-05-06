@@ -115,12 +115,14 @@ def _compute_steering_vector(
         neg_vecs = neg_vecs_raw
 
     if len(pos_vecs) == 0 or len(neg_vecs) == 0:
-        raise RuntimeError(f"[d3] empty pooled vectors for {concept_name}/{strategy_id}")
+        log.warning(f"  [d3] empty pooled vectors for {concept_name}/{strategy_id} — returning None")
+        return None
 
     sv   = pos_vecs.mean(0) - neg_vecs.mean(0)
     norm = np.linalg.norm(sv)
     if norm <= 1e-9:
-        raise RuntimeError(f"[d3] zero-norm steering vector for {concept_name}/{strategy_id}")
+        log.warning(f"  [d3] zero-norm steering vector for {concept_name}/{strategy_id} (P2_first_token/BOS) — returning None")
+        return None
     return (sv / norm).astype(np.float32)
 
 
