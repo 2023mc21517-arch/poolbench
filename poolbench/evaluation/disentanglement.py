@@ -262,7 +262,14 @@ def compute_disentanglement_for_model(
             scp_strat = scp_results.get(concept_name, {}).get(strat_id, {})
             delta_a   = scp_strat.get("SCP_c", None)
             if delta_a is None:
-                raise RuntimeError(f"[d3] No SCP_c for {concept_name}/{strat_id}")
+                log.warning(f"  [d3] SCP_c=None for {concept_name}/{strat_id} (zero-norm) — skipping strategy")
+                concept_d3[strat_id] = {
+                    "D3_LD": None, "D3_LC": None,
+                    "D3_rep_LD": None, "D3_rep_LC": None,
+                    "delta_A": None, "delta_B_LD": None, "delta_B_LC": None,
+                    "zero_norm": True,
+                }
+                continue
 
             # ── Compute steering vector for concept A ──
             sv_a = _compute_steering_vector(
@@ -272,7 +279,14 @@ def compute_disentanglement_for_model(
                 tokenizer=tokenizer,
             )
             if sv_a is None:
-                raise RuntimeError(f"[d3] no steering vector for {concept_name}/{strat_id}")
+                log.warning(f"  [d3] no steering vector for {concept_name}/{strat_id} — skipping strategy")
+                concept_d3[strat_id] = {
+                    "D3_LD": None, "D3_LC": None,
+                    "D3_rep_LD": None, "D3_rep_LC": None,
+                    "delta_A": None, "delta_B_LD": None, "delta_B_LC": None,
+                    "zero_norm": True,
+                }
+                continue
 
             # ── Generate text steered toward concept A at α=1.0 ──
             steered_texts = _generate_with_steering(
