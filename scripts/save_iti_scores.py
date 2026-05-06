@@ -54,13 +54,17 @@ def main() -> None:
         print(f"[ERROR] Activation dir not found: {layer_act_dir}")
         sys.exit(1)
 
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = OUT_DIR / f"{args.model}_iti_head_scores.json"
+
+    if out_path.exists():
+        print(f"[SKIP] {out_path} already exists — delete it to recompute.")
+        return
+
     print(f"Building ITI probes for {args.model} at layer {best_layer} ...")
     probes = build_iti_concept_probes(
         layer_act_dir, CONCEPTS, partition="train", device=args.device
     )
-
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = OUT_DIR / f"{args.model}_iti_head_scores.json"
 
     results = {}
     for concept_name, probe in probes.items():
