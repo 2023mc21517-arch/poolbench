@@ -375,12 +375,26 @@ def extract_activations_for_model(
     concept_corpus_dir = Path(concept_corpus_dir)
     out_dir            = Path(out_dir)
     activation_dtype   = _activation_save_dtype(activation_save_dtype)
-    model, tokenizer   = load_model(model_name, hf_id, device=device)
 
     if (concept_corpus_dir / "train_pos.jsonl").exists():
         concept_dirs = [concept_corpus_dir]
     else:
         concept_dirs = [d for d in sorted(concept_corpus_dir.iterdir()) if d.is_dir()]
+
+    # Early-exit before loading the model if all activations already exist
+    if skip_existing:
+        all_exist = all(
+            (out_dir / model_name / f"layer_{li}" / f"{cd.name}_{p}_{s}.npy").exists()
+            for cd in concept_dirs
+            for li in candidate_layers
+            for p in ("train", "test")
+            for s in ("pos", "neg")
+        )
+        if all_exist:
+            log.info(f"  [extract] {model_name}: all activations exist — skipping model load")
+            return
+
+    model, tokenizer   = load_model(model_name, hf_id, device=device)
 
     n_layers   = len(candidate_layers)
     n_concepts = len(concept_dirs)
