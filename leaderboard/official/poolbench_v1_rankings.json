@@ -1,0 +1,9 @@
+{
+  "_comment": "PoolBench v1 — ranked strategy summary. Cross-model mean of D1/D2/D3. Run scripts/populate_leaderboard.py to fill.",
+  "_note": "Strategies ranked by cross-model mean D1 AUROC (descending). D2 and D3 are secondary quality dimensions. Higher D1 = better concept separation. Higher D2 = steering more effective. D3 closer to 1.0 = more specific (less collateral leakage).",
+  "version": "1.0",
+  "date": "2026-05-06",
+  "construction_method": "C1_difmean",
+  "models_included": ["model_A", "model_B", "model_C"],
+  "ranked_strategies": []
+}

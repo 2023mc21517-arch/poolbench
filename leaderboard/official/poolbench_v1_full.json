@@ -1,0 +1,16 @@
+{
+  "_comment": "PoolBench v1 — full per-concept breakdown. Run scripts/populate_leaderboard.py to fill.",
+  "_note": "For each model: per concept, per strategy — D1 AUROC, D2 SCP_c, D3_LD, D3_LC. All at best layer. Cells null if pending or the strategy produced a zero-norm steering vector for that concept.",
+  "version": "1.0",
+  "date": "2026-05-06",
+  "construction_method": "C1_difmean",
+  "strategies": [
+    "P1_last_token", "P2_first_token", "P3_CLS",
+    "A1_mean", "A2_max", "A3_random", "A4_norm",
+    "W1_mean_last_4", "W2_mean_last_8", "W3_mean_last_16", "W4_hierarchical",
+    "S1_attention_weighted", "S2_SIF", "S3_ITI_exact",
+    "L1_POS_filtered", "L2_dependency_rel", "L3_named_entity",
+    "L4_subword_root", "L5_SVO"
+  ],
+  "models": {}
+}
