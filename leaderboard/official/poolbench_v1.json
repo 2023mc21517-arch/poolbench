@@ -1,11 +1,13 @@
 {
   "_comment": "Official PoolBench v1 results. Model identifiers anonymized for review.",
   "_note": "Cells marked null are pending or excluded (see paper Table 1 footnotes).",
-  "_metrics": {
+    "_metrics": {
     "D1_mean_auroc": "Mean AUROC across all concepts at best layer (C1 DiffMean construction). Higher is better. Chance = 0.5.",
-    "D2_mean_scp_c": "Mean Steered Concept Prevalence (SCP_c) at α=1.0 across all concepts. Δ in classifier score after steering. Higher = steering moves generated text toward the concept.",
-    "D3_mean_ld": "Mean Disentanglement (lexically distant neighbour): 1 - Δ_B_LD / Δ_A. Closer to 1 = steering does NOT leak into a distant concept (good). Closer to 0 or negative = leakage.",
-    "D3_mean_lc": "Mean Disentanglement (lexically close neighbour): 1 - Δ_B_LC / Δ_A. Same interpretation. Closer to 1 = better specificity."
+    "D2_mean_scp_c": "Mean Steered Concept Prevalence (SCP_c) at α=1.0. Δ classifier score after steering. Higher = steering works. Negative = steering inverted (sign issue).",
+    "D2_mean_M_c": "Mean monotonicity (Spearman ρ between α and Δ classifier score). Range −1 to 1. Closer to 1 = steering scales smoothly with strength.",
+    "D2_mean_phi_c": "Mean fluency cost (Φ_c = ppl_steered/ppl_baseline × length correction). Closer to 1.0 = no fluency degradation. >1 = text gets less fluent when steered.",
+    "D3_mean_ld": "Mean Disentanglement vs lexically distant neighbour: 1 − Δ_B_LD/Δ_A. Closer to 1 = steering is specific. Null when |D2| < 0.01 (undefined).",
+    "D3_mean_lc": "Mean Disentanglement vs lexically close neighbour: same formula, harder test. Null when |D2| < 0.01."
   },
   "version": "1.0",
   "date": "2026-05-06",
@@ -25,6 +27,8 @@
       "best_layer": null,
       "D1_mean_auroc_per_strategy": {},
       "D2_mean_scp_c_per_strategy": {},
+      "D2_mean_M_c_per_strategy": {},
+      "D2_mean_phi_c_per_strategy": {},
       "D3_mean_ld_per_strategy": {},
       "D3_mean_lc_per_strategy": {}
     },
@@ -34,6 +38,8 @@
       "best_layer": null,
       "D1_mean_auroc_per_strategy": {},
       "D2_mean_scp_c_per_strategy": {},
+      "D2_mean_M_c_per_strategy": {},
+      "D2_mean_phi_c_per_strategy": {},
       "D3_mean_ld_per_strategy": {},
       "D3_mean_lc_per_strategy": {}
     },
@@ -42,6 +48,8 @@
       "parameters": "7B",
       "best_layer": null,
       "D1_mean_auroc_per_strategy": {},
+      "D2_mean_M_c_per_strategy": {},
+      "D2_mean_phi_c_per_strategy": {},
       "D2_mean_scp_c_per_strategy": {},
       "D3_mean_ld_per_strategy": {},
       "D3_mean_lc_per_strategy": {}
@@ -52,6 +60,8 @@
       "best_layer": null,
       "D1_mean_auroc_per_strategy": {},
       "D2_mean_scp_c_per_strategy": {},
+      "D2_mean_M_c_per_strategy": {},
+      "D2_mean_phi_c_per_strategy": {},
       "D3_mean_ld_per_strategy": {},
       "D3_mean_lc_per_strategy": {}
     },
@@ -61,6 +71,8 @@
       "best_layer": null,
       "D1_mean_auroc_per_strategy": {},
       "D2_mean_scp_c_per_strategy": {},
+      "D2_mean_M_c_per_strategy": {},
+      "D2_mean_phi_c_per_strategy": {},
       "D3_mean_ld_per_strategy": {},
       "D3_mean_lc_per_strategy": {}
     },
@@ -70,6 +82,8 @@
       "best_layer": null,
       "D1_mean_auroc_per_strategy": {},
       "D2_mean_scp_c_per_strategy": {},
+      "D2_mean_M_c_per_strategy": {},
+      "D2_mean_phi_c_per_strategy": {},
       "D3_mean_ld_per_strategy": {},
       "D3_mean_lc_per_strategy": {}
     },
@@ -79,6 +93,8 @@
       "best_layer": null,
       "D1_mean_auroc_per_strategy": {},
       "D2_mean_scp_c_per_strategy": {},
+      "D2_mean_M_c_per_strategy": {},
+      "D2_mean_phi_c_per_strategy": {},
       "D3_mean_ld_per_strategy": {},
       "D3_mean_lc_per_strategy": {}
     }

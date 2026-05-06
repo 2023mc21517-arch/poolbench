@@ -126,14 +126,22 @@ def _extract_model_data(model_name: str, ranked_strategies: list[str]) -> dict |
 
             scp_entry = scp_raw.get(concept, {}).get(s, {})
             d2_val    = scp_entry.get("SCP_c") if isinstance(scp_entry, dict) else None
+            mc_val    = scp_entry.get("M_c")   if isinstance(scp_entry, dict) else None
+            phic_val  = scp_entry.get("phi_c") if isinstance(scp_entry, dict) else None
 
             d3_entry  = d3_raw.get(concept, {}).get(s, {})
-            d3_ld_val = d3_entry.get("D3_LD")  if isinstance(d3_entry, dict) else None
-            d3_lc_val = d3_entry.get("D3_LC")  if isinstance(d3_entry, dict) else None
+            d3_ld_raw = d3_entry.get("D3_LD")  if isinstance(d3_entry, dict) else None
+            d3_lc_raw = d3_entry.get("D3_LC")  if isinstance(d3_entry, dict) else None
+            # Gate D3 to None when |D2| < 0.01 — formula 1-Δ_B/Δ_A is undefined near zero D2
+            d3_valid  = d2_val is not None and abs(float(d2_val)) >= 0.01
+            d3_ld_val = d3_ld_raw if d3_valid else None
+            d3_lc_val = d3_lc_raw if d3_valid else None
 
             concept_data[s] = {
-                "D1_auroc": round(float(d1_val), 5) if d1_val is not None else None,
-                "D2_scp_c": round(float(d2_val), 5) if d2_val is not None else None,
+                "D1_auroc": round(float(d1_val),   5) if d1_val   is not None else None,
+                "D2_scp_c": round(float(d2_val),   5) if d2_val   is not None else None,
+                "D2_M_c":   round(float(mc_val),   4) if mc_val   is not None else None,
+                "D2_phi_c": round(float(phic_val), 4) if phic_val is not None else None,
                 "D3_LD":    round(float(d3_ld_val), 5) if d3_ld_val is not None else None,
                 "D3_LC":    round(float(d3_lc_val), 5) if d3_lc_val is not None else None,
             }
@@ -142,13 +150,17 @@ def _extract_model_data(model_name: str, ranked_strategies: list[str]) -> dict |
     # Compute per-strategy means across concepts
     means: dict[str, dict] = {}
     for s in ranked_strategies:
-        d1_vals  = [per_concept[c][s]["D1_auroc"] for c in per_concept if per_concept[c][s]["D1_auroc"] is not None]
-        d2_vals  = [per_concept[c][s]["D2_scp_c"] for c in per_concept if per_concept[c][s]["D2_scp_c"] is not None]
-        ld_vals  = [per_concept[c][s]["D3_LD"]    for c in per_concept if per_concept[c][s]["D3_LD"]    is not None]
-        lc_vals  = [per_concept[c][s]["D3_LC"]    for c in per_concept if per_concept[c][s]["D3_LC"]    is not None]
+        d1_vals  = [per_concept[c][s]["D1_auroc"]  for c in per_concept if per_concept[c][s]["D1_auroc"]  is not None]
+        d2_vals  = [per_concept[c][s]["D2_scp_c"]  for c in per_concept if per_concept[c][s]["D2_scp_c"]  is not None]
+        mc_vals  = [per_concept[c][s]["D2_M_c"]    for c in per_concept if per_concept[c][s]["D2_M_c"]    is not None]
+        phi_vals = [per_concept[c][s]["D2_phi_c"]  for c in per_concept if per_concept[c][s]["D2_phi_c"]  is not None]
+        ld_vals  = [per_concept[c][s]["D3_LD"]     for c in per_concept if per_concept[c][s]["D3_LD"]     is not None]
+        lc_vals  = [per_concept[c][s]["D3_LC"]     for c in per_concept if per_concept[c][s]["D3_LC"]     is not None]
         means[s] = {
             "D1_mean_auroc": _safe_mean(d1_vals),
             "D2_mean_scp_c": _safe_mean(d2_vals),
+            "D2_mean_M_c":   _safe_mean(mc_vals),
+            "D2_mean_phi_c": _safe_mean(phi_vals),
             "D3_mean_LD":    _safe_mean(ld_vals),
             "D3_mean_LC":    _safe_mean(lc_vals),
         }
@@ -161,11 +173,13 @@ def _extract_model_data(model_name: str, ranked_strategies: list[str]) -> dict |
 def _write_summary(leaderboard: dict, model_name: str, lb_key: str,
                    model_data: dict, dry_run: bool) -> None:
     m = leaderboard["models"][lb_key]
-    m["best_layer"]                 = model_data["best_layer"]
-    m["D1_mean_auroc_per_strategy"] = {s: v["D1_mean_auroc"] for s, v in model_data["means"].items()}
-    m["D2_mean_scp_c_per_strategy"] = {s: v["D2_mean_scp_c"] for s, v in model_data["means"].items()}
-    m["D3_mean_ld_per_strategy"]    = {s: v["D3_mean_LD"]    for s, v in model_data["means"].items()}
-    m["D3_mean_lc_per_strategy"]    = {s: v["D3_mean_LC"]    for s, v in model_data["means"].items()}
+    m["best_layer"]                  = model_data["best_layer"]
+    m["D1_mean_auroc_per_strategy"]  = {s: v["D1_mean_auroc"] for s, v in model_data["means"].items()}
+    m["D2_mean_scp_c_per_strategy"]  = {s: v["D2_mean_scp_c"] for s, v in model_data["means"].items()}
+    m["D2_mean_M_c_per_strategy"]    = {s: v["D2_mean_M_c"]   for s, v in model_data["means"].items()}
+    m["D2_mean_phi_c_per_strategy"]  = {s: v["D2_mean_phi_c"] for s, v in model_data["means"].items()}
+    m["D3_mean_ld_per_strategy"]     = {s: v["D3_mean_LD"]    for s, v in model_data["means"].items()}
+    m["D3_mean_lc_per_strategy"]     = {s: v["D3_mean_LC"]    for s, v in model_data["means"].items()}
 
 
 def _write_full(leaderboard: dict, model_name: str, lb_key: str,
@@ -190,6 +204,8 @@ def _build_rankings(all_model_data: dict[str, dict],
             per_model[lb_key] = {
                 "D1_mean_auroc": m["D1_mean_auroc"],
                 "D2_mean_scp_c": m["D2_mean_scp_c"],
+                "D2_mean_M_c":   m["D2_mean_M_c"],
+                "D2_mean_phi_c": m["D2_mean_phi_c"],
                 "D3_mean_LD":    m["D3_mean_LD"],
                 "D3_mean_LC":    m["D3_mean_LC"],
             }
@@ -252,12 +268,14 @@ def main() -> None:
 
         print(f"  best_layer = {data['best_layer']}  "
               f"concepts = {len(data['per_concept'])}")
-        print(f"\n  {'Strategy':<28s}  {'D1':>8}  {'D2':>8}  {'D3_LD':>8}  {'D3_LC':>8}")
+        print(f"\n  {'Strategy':<28s}  {'D1':>8}  {'D2_scp':>8}  {'D2_Mc':>7}  {'D2_phi':>7}  {'D3_LD':>8}  {'D3_LC':>8}")
         for s in RANKED_STRATEGIES:
             m = data["means"][s]
             print(f"  {s:<28s}  "
                   f"{str(m['D1_mean_auroc']):>8}  "
                   f"{str(m['D2_mean_scp_c']):>8}  "
+                  f"{str(m['D2_mean_M_c']):>7}  "
+                  f"{str(m['D2_mean_phi_c']):>7}  "
                   f"{str(m['D3_mean_LD']):>8}  "
                   f"{str(m['D3_mean_LC']):>8}")
 
@@ -273,7 +291,7 @@ def main() -> None:
     ranked = _build_rankings(all_model_data, RANKED_STRATEGIES)
     print(f"\n{'═'*55}")
     print("  Rankings (cross-model mean D1 descending):\n")
-    print(f"  {'Rank':>4}  {'Strategy':<28s}  {'D1':>8}  {'D2':>8}  {'D3_LD':>8}  {'D3_LC':>8}")
+    print(f"  {'Rank':>4}  {'Strategy':<28s}  {'D1':>8}  {'D2_scp':>8}  {'D3_LD':>8}  {'D3_LC':>8}")
     for r in ranked:
         print(f"  {r['rank']:>4}  {r['strategy']:<28s}  "
               f"{str(r['cross_model_D1_auroc']):>8}  "
