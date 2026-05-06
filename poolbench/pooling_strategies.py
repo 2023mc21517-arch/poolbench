@@ -344,12 +344,30 @@ def pool_IxG(model, text: str, tokenizer, layer: int,
         handle = model.transformer.h[layer].register_forward_hook(fwd_hook)
 
     model.zero_grad()
-    with torch.enable_grad():
-        outputs = model(**enc)
-        scalar = outputs.logits[0, -1, :].max()
-        scalar.backward()
-    handle.remove()
-    model.zero_grad()
+    try:
+        with torch.enable_grad():
+            outputs = model(**enc)
+            scalar = outputs.logits[0, -1, :].max()
+            scalar.backward()
+    except torch.cuda.OutOfMemoryError:
+        handle.remove()
+        model.zero_grad()
+        torch.cuda.empty_cache()
+        # Retry once after clearing cache
+        hidden_store.clear()
+        try:
+            handle = model.model.layers[layer].register_forward_hook(fwd_hook)
+        except AttributeError:
+            handle = model.transformer.h[layer].register_forward_hook(fwd_hook)
+        with torch.enable_grad():
+            outputs = model(**enc)
+            scalar = outputs.logits[0, -1, :].max()
+            scalar.backward()
+        handle.remove()
+        model.zero_grad()
+    else:
+        handle.remove()
+        model.zero_grad()
 
     hh = hidden_store.get("h")
     if hh is None or hh.grad is None:

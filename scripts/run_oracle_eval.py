@@ -203,6 +203,10 @@ def run_oracle_for_model(model_name: str, args: argparse.Namespace) -> dict:
         if not results.get(concept):
             results[concept] = {}
 
+        import torch as _torch  # noqa: PLC0415
+        if _torch.cuda.is_available():
+            _torch.cuda.empty_cache()
+
         for layer in cfg["candidate_layers"]:
             layer_key = str(layer)
             if not args.force and layer_key in results.get(concept, {}):
