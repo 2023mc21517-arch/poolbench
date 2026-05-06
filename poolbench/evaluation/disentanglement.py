@@ -323,11 +323,13 @@ def compute_disentanglement_for_model(
                 act_dir, model_name, best_layer, ld_concept, strat_id,
                 unigram_probs=unigram_probs,
                 concept_probe=concept_probes.get(ld_concept),
+                tokenizer=tokenizer,
             )
             sv_lc = _compute_steering_vector(
                 act_dir, model_name, best_layer, lc_concept, strat_id,
                 unigram_probs=unigram_probs,
                 concept_probe=concept_probes.get(lc_concept),
+                tokenizer=tokenizer,
             )
 
             d3_rep_ld = round(_cosine_sim(sv_a, sv_ld), 5) if sv_ld is not None else None
