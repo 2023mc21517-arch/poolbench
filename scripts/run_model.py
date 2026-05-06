@@ -329,13 +329,25 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
         layer_out_path  = layer_auroc_dir / f"{model_name}_auroc_results.json"
 
         existing_layer = _safe_load_json(layer_out_path) if skip_existing else None
+        _layer_concepts = concepts_to_run  # default: all concepts for this layer
         if existing_layer is not None:
             missing = _missing_keys(existing_layer, expected_keys)
             if not missing:
                 log.info(f"  [checkpoint] Step 2 layer {layer_idx} already complete → {layer_out_path}; skipping")
                 per_layer_results[layer_idx] = existing_layer
                 continue
-            log.info(f"  [checkpoint] Step 2 layer {layer_idx} missing {len(missing)} AUROC cells — recomputing layer")
+            # Narrow to only the concepts that have missing AUROC cells so a mid-layer crash can resume
+            _missing_concepts = {
+                c for c in concepts_to_run
+                for s in RANKED_STRATEGIES
+                if f"{c}_{s}" in missing
+            }
+            if _missing_concepts and len(_missing_concepts) < len(concepts_to_run):
+                log.info(f"  [checkpoint] Step 2 layer {layer_idx}: resuming {len(_missing_concepts)}/"
+                         f"{len(concepts_to_run)} incomplete concepts ({len(missing)} missing cells)")
+                _layer_concepts = {k: v for k, v in concepts_to_run.items() if k in _missing_concepts}
+            else:
+                log.info(f"  [checkpoint] Step 2 layer {layer_idx} missing {len(missing)} AUROC cells — recomputing layer")
 
         # ── Pooled-vector cache ────────────────────────────────────────────
         # C1 computes and saves the full pooled arrays to disk so C2-C5 can
@@ -349,16 +361,21 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
                 _cached = pickle.load(_f)
             train_pooled_results = _cached["train"]
             test_pooled_results  = _cached["test"]
+            # Filter to only the concepts that need recomputing
+            if _layer_concepts is not concepts_to_run:
+                _key_prefixes = tuple(f"{c}_" for c in _layer_concepts)
+                train_pooled_results = {k: v for k, v in train_pooled_results.items() if k.startswith(_key_prefixes)}
+                test_pooled_results  = {k: v for k, v in test_pooled_results.items() if k.startswith(_key_prefixes)}
         else:
-            unigram_probs = build_unigram_probs_from_activations(layer_act_dir, concepts_to_run, partition="train")
-            concept_probes = build_iti_concept_probes(layer_act_dir, concepts_to_run, partition="train", device=device)
+            unigram_probs = build_unigram_probs_from_activations(layer_act_dir, _layer_concepts, partition="train")
+            concept_probes = build_iti_concept_probes(layer_act_dir, _layer_concepts, partition="train", device=device)
             log.info(f"  [pool] S2 unigram vocab={len(unigram_probs)}  S3 ITI probes={len(concept_probes)}")
 
             # Build pooled_results: {concept_strategy: {pos_pooled, neg_pooled}}
             train_pooled_results: dict = {}
             test_pooled_results: dict = {}
-            n_concepts_to_run = len(concepts_to_run)
-            for concept_i, concept_name in enumerate(concepts_to_run, 1):
+            n_concepts_to_run = len(_layer_concepts)
+            for concept_i, concept_name in enumerate(_layer_concepts, 1):
                 log.info(f"  [pool] L{layer_idx} concept {concept_i}/{n_concepts_to_run}: {concept_name}")
                 # Verify files exist without loading them (compute_all_pooling_strategies reloads from disk)
                 for _part in ("train", "test"):
@@ -389,8 +406,9 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
                 train_pooled_results.update(train_layer_pooled)
                 test_pooled_results.update(test_layer_pooled)
 
-            # Save cache for C2-C5 reuse (only from C1, only when all concepts run)
-            if _is_primary and concept_filter is None:
+            # Save cache whenever it doesn't exist yet (C1 or first C2 run)
+            # so subsequent C2-C5 runs can skip all pooling/ITI-probe work.
+            if concept_filter is None and not _layer_cache_path.exists():
                 _pool_cache_dir.mkdir(parents=True, exist_ok=True)
                 with open(_layer_cache_path, "wb") as _f:
                     pickle.dump({"train": train_pooled_results, "test": test_pooled_results}, _f)
@@ -404,7 +422,10 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
             construction_method  = construction_method,
             sae_model            = _load_sae_for_step2(model_name, layer_idx, construction_method),
         )
-        if concept_filter is not None:
+        if existing_layer is not None and _layer_concepts is not concepts_to_run:
+            # Mid-layer resume: merge newly computed concepts into the existing partial checkpoint
+            auroc_res = _merge_auroc_results(existing_layer, auroc_res, list(_layer_concepts))
+        elif concept_filter is not None:
             auroc_res = _merge_auroc_results(existing_layer, auroc_res, list(concepts_to_run))
         # Always checkpoint the layer result so a crash can be resumed from the next layer
         layer_auroc_dir.mkdir(parents=True, exist_ok=True)
