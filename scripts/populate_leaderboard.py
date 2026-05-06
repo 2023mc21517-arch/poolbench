@@ -191,34 +191,72 @@ def _write_full(leaderboard: dict, model_name: str, lb_key: str,
     }
 
 
-def _build_master_table(all_model_data: dict[str, dict],
-                        ranked_strategies: list[str]) -> dict:
-    """
-    Build master_table[model_key][strategy][concept] = {D1, D2_scp_c, D2_M_c, D2_phi_c, D3_LD, D3_LC}
-    Axis order: model → strategy → concept → metrics.
-    """
+def _cell(metrics: dict) -> dict:
+    """Return a clean metrics cell (shared by both master table layouts)."""
+    return {
+        "D1_auroc":  metrics.get("D1_auroc"),
+        "D2_scp_c":  metrics.get("D2_scp_c"),
+        "D2_M_c":    metrics.get("D2_M_c"),
+        "D2_phi_c":  metrics.get("D2_phi_c"),
+        "D3_LD":     metrics.get("D3_LD"),
+        "D3_LC":     metrics.get("D3_LC"),
+    }
+
+
+def _mean_cell(means: dict) -> dict:
+    return {
+        "D1_auroc":  means["D1_mean_auroc"],
+        "D2_scp_c":  means["D2_mean_scp_c"],
+        "D2_M_c":    means["D2_mean_M_c"],
+        "D2_phi_c":  means["D2_mean_phi_c"],
+        "D3_LD":     means["D3_mean_LD"],
+        "D3_LC":     means["D3_mean_LC"],
+    }
+
+
+def _build_master_msc(all_model_data: dict[str, dict],
+                      ranked_strategies: list[str]) -> dict:
+    """Axis order: model → strategy → concept → metrics."""
     master: dict[str, dict] = {}
-    for model_name, lb_key in MODEL_TO_LEADERBOARD_KEY.items():
+    for model_name in MODEL_TO_LEADERBOARD_KEY:
         if model_name not in all_model_data:
             continue
-        per_concept = all_model_data[model_name]["per_concept"]  # concept → strategy → metrics
+        per_concept = all_model_data[model_name]["per_concept"]
         model_block: dict[str, dict] = {}
         for s in ranked_strategies:
             strat_block: dict[str, dict] = {}
             for concept in sorted(per_concept):
-                strat_block[concept] = per_concept[concept][s]       # {D1_auroc, D2_scp_c, ...}
-            # Also add cross-concept mean row
-            means = all_model_data[model_name]["means"][s]
-            strat_block["_mean"] = {
-                "D1_auroc":  means["D1_mean_auroc"],
-                "D2_scp_c":  means["D2_mean_scp_c"],
-                "D2_M_c":    means["D2_mean_M_c"],
-                "D2_phi_c":  means["D2_mean_phi_c"],
-                "D3_LD":     means["D3_mean_LD"],
-                "D3_LC":     means["D3_mean_LC"],
-            }
+                strat_block[concept] = _cell(per_concept[concept][s])
+            strat_block["_mean"] = _mean_cell(all_model_data[model_name]["means"][s])
             model_block[s] = strat_block
-        master[lb_key] = model_block
+        master[model_name] = model_block
+    return master
+
+
+def _build_master_mcs(all_model_data: dict[str, dict],
+                      ranked_strategies: list[str]) -> dict:
+    """Axis order: model → concept → strategy → metrics."""
+    master: dict[str, dict] = {}
+    for model_name in MODEL_TO_LEADERBOARD_KEY:
+        if model_name not in all_model_data:
+            continue
+        per_concept = all_model_data[model_name]["per_concept"]
+        model_block: dict[str, dict] = {}
+        for concept in sorted(per_concept):
+            concept_block: dict[str, dict] = {}
+            for s in ranked_strategies:
+                concept_block[s] = _cell(per_concept[concept][s])
+            # Cross-strategy mean for this concept
+            concept_block["_mean"] = {
+                "D1_auroc":  _safe_mean([per_concept[concept][s]["D1_auroc"] for s in ranked_strategies if per_concept[concept][s]["D1_auroc"] is not None]),
+                "D2_scp_c":  _safe_mean([per_concept[concept][s]["D2_scp_c"] for s in ranked_strategies if per_concept[concept][s]["D2_scp_c"] is not None]),
+                "D2_M_c":    _safe_mean([per_concept[concept][s]["D2_M_c"]   for s in ranked_strategies if per_concept[concept][s]["D2_M_c"]   is not None]),
+                "D2_phi_c":  _safe_mean([per_concept[concept][s]["D2_phi_c"] for s in ranked_strategies if per_concept[concept][s]["D2_phi_c"] is not None]),
+                "D3_LD":     _safe_mean([per_concept[concept][s]["D3_LD"]    for s in ranked_strategies if per_concept[concept][s]["D3_LD"]    is not None]),
+                "D3_LC":     _safe_mean([per_concept[concept][s]["D3_LC"]    for s in ranked_strategies if per_concept[concept][s]["D3_LC"]    is not None]),
+            }
+            model_block[concept] = concept_block
+        master[model_name] = model_block
     return master
 
 
@@ -336,27 +374,49 @@ def main() -> None:
         print("\nNo models had results — nothing written.")
         return
 
-    # Build and print master table (model → strategy → concept → metrics)
-    master_table = _build_master_table(all_model_data, RANKED_STRATEGIES)
-    print(f"\n{'█'*55}")
-    print("  MASTER TABLE  (model × strategy × concept → metrics)\n")
-    hdr = f"  {'Model':<10}  {'Strategy':<28}  {'Concept':<24}  {'D1':>8}  {'D2_scp':>8}  {'D2_Mc':>7}  {'D2_phi':>7}  {'D3_LD':>8}  {'D3_LC':>8}"
-    print(hdr)
-    print(f"  {'─'*len(hdr)}")
+    # Build both master table variants
+    master_msc = _build_master_msc(all_model_data, RANKED_STRATEGIES)
+    master_mcs = _build_master_mcs(all_model_data, RANKED_STRATEGIES)
+
     def _fmt(v): return f"{float(v):.5f}" if v is not None else "   None"
-    for lb_key, strat_dict in master_table.items():
+    col_hdr = f"  {'Model':<14}  {'Strategy':<28}  {'Concept':<24}  {'D1':>8}  {'D2_scp':>8}  {'D2_Mc':>7}  {'D2_phi':>7}  {'D3_LD':>8}  {'D3_LC':>8}"
+    div = f"  {'─'*130}"
+
+    print(f"\n{'█'*55}")
+    print("  MASTER TABLE v1 — model × strategy × concept\n")
+    print(col_hdr)
+    print(div)
+    for model_name, strat_dict in master_msc.items():
         for s in RANKED_STRATEGIES:
             concept_dict = strat_dict[s]
-            # Regular concepts first (sorted), then _mean last
             for concept in sorted(k for k in concept_dict if k != "_mean"):
                 c = concept_dict[concept]
-                print(f"  {lb_key:<10}  {s:<28}  {concept:<24}  "
+                print(f"  {model_name:<14}  {s:<28}  {concept:<24}  "
                       f"{_fmt(c['D1_auroc']):>8}  {_fmt(c['D2_scp_c']):>8}  "
                       f"{_fmt(c['D2_M_c']):>7}  {_fmt(c['D2_phi_c']):>7}  "
                       f"{_fmt(c['D3_LD']):>8}  {_fmt(c['D3_LC']):>8}")
-            # Mean row
             cm = concept_dict["_mean"]
-            print(f"  {lb_key:<10}  {s:<28}  {'[MEAN]':<24}  "
+            print(f"  {model_name:<14}  {s:<28}  {'[MEAN]':<24}  "
+                  f"{_fmt(cm['D1_auroc']):>8}  {_fmt(cm['D2_scp_c']):>8}  "
+                  f"{_fmt(cm['D2_M_c']):>7}  {_fmt(cm['D2_phi_c']):>7}  "
+                  f"{_fmt(cm['D3_LD']):>8}  {_fmt(cm['D3_LC']):>8}")
+
+    col_hdr2 = f"  {'Model':<14}  {'Concept':<24}  {'Strategy':<28}  {'D1':>8}  {'D2_scp':>8}  {'D2_Mc':>7}  {'D2_phi':>7}  {'D3_LD':>8}  {'D3_LC':>8}"
+    print(f"\n{'█'*55}")
+    print("  MASTER TABLE v2 — model × concept × strategy\n")
+    print(col_hdr2)
+    print(div)
+    for model_name, concept_dict in master_mcs.items():
+        for concept in sorted(k for k in concept_dict):
+            strat_dict2 = concept_dict[concept]
+            for s in RANKED_STRATEGIES:
+                c = strat_dict2[s]
+                print(f"  {model_name:<14}  {concept:<24}  {s:<28}  "
+                      f"{_fmt(c['D1_auroc']):>8}  {_fmt(c['D2_scp_c']):>8}  "
+                      f"{_fmt(c['D2_M_c']):>7}  {_fmt(c['D2_phi_c']):>7}  "
+                      f"{_fmt(c['D3_LD']):>8}  {_fmt(c['D3_LC']):>8}")
+            cm = strat_dict2["_mean"]
+            print(f"  {model_name:<14}  {concept:<24}  {'[MEAN]':<28}  "
                   f"{_fmt(cm['D1_auroc']):>8}  {_fmt(cm['D2_scp_c']):>8}  "
                   f"{_fmt(cm['D2_M_c']):>7}  {_fmt(cm['D2_phi_c']):>7}  "
                   f"{_fmt(cm['D3_LD']):>8}  {_fmt(cm['D3_LC']):>8}")
@@ -377,14 +437,15 @@ def main() -> None:
         rankings_lb["ranked_strategies"] = ranked
         rankings_lb["models_included"]   = [MODEL_TO_LEADERBOARD_KEY[m] for m in all_model_data]
 
-        # Write master table (model → strategy → concept → metrics + leaderboard)
+        # Write both master table variants + leaderboard into master file
         master_lb["_description"] = (
-            "Master table: master_table[model][strategy][concept] = "
-            "{D1_auroc, D2_scp_c, D2_M_c, D2_phi_c, D3_LD, D3_LC}. "
-            "'_mean' key under each strategy = cross-concept mean. "
+            "master_msc[model][strategy][concept] = metrics (model×strategy×concept). "
+            "master_mcs[model][concept][strategy] = metrics (model×concept×strategy). "
+            "'_mean' key = average over the last axis. "
             "leaderboard = ranked strategy summary (cross-model D1 descending)."
         )
-        master_lb["master_table"] = master_table
+        master_lb["master_msc"]   = master_msc
+        master_lb["master_mcs"]   = master_mcs
         master_lb["leaderboard"]  = ranked
 
         with open(SUMMARY_PATH, "w") as f:
