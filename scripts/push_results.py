@@ -42,18 +42,35 @@ RESULTS_DIR = BASE_DIR / "results"
 # Glob patterns relative to BASE_DIR that we want to force-add.
 # These are all JSON/PNG result files — no binaries, no large arrays.
 INCLUDE_PATTERNS: list[str] = [
-    "results/auroc/**/best_layer_auroc.json",
-    "results/auroc/**/fallback_rates.json",
-    "results/nemenyi/*.json",
-    "results/icc/*.json",
-    "results/linearity/*.json",
+    # D1 — AUROC
+    "results/auroc/**/*.json",
+    "results/auroc/**/*.png",
+    # D2 — SCP
     "results/scp/*.json",
+    # D3 — Disentanglement
     "results/disentanglement/*.json",
-    "results/oracle_auroc/*.json",
+    # Ablation
+    "results/ablation/**/*.json",
+    "results/ablation/**/*.png",
+    # ICC
+    "results/icc/*.json",
+    # ITI head scores
+    "results/iti_head_scores/*.json",
+    # Linearity
+    "results/linearity/*.json",
+    # Nemenyi
+    "results/nemenyi/*.json",
+    # SAE interpretability
+    "results/sae_interpretability/*.json",
+    "results/sae_interpretability/*.png",
+    # Steered outputs
+    "results/steered_outputs/**/*.json",
+    "results/steered_outputs/**/*.txt",
+    # Layer rank
     "results/layer_rank_correlation.json",
     "results/layer_rank_correlation.png",
-    "results/power_analysis.json",
-    "leaderboard/official/poolbench_v1.json",
+    # Leaderboard
+    "leaderboard/official/*.json",
 ]
 
 
