@@ -81,7 +81,7 @@ def main() -> None:
     out_layer_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Building unigram probs for {args.model} ...")
-    unigram_probs = build_unigram_probs_from_activations(layer_act_dir)
+    unigram_probs = build_unigram_probs_from_activations(layer_act_dir, CONCEPTS)
 
     print(f"Building ITI probes for {args.model} ...")
     concept_probes = build_iti_concept_probes(
