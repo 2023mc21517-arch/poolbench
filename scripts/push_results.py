@@ -63,9 +63,13 @@ INCLUDE_PATTERNS: list[str] = [
     # SAE interpretability
     "results/sae_interpretability/*.json",
     "results/sae_interpretability/*.png",
-    # Steered outputs
+    # Steered outputs (flat + nested, common text formats)
+    "results/steered_outputs/*.json",
+    "results/steered_outputs/*.txt",
+    "results/steered_outputs/*.csv",
     "results/steered_outputs/**/*.json",
     "results/steered_outputs/**/*.txt",
+    "results/steered_outputs/**/*.csv",
     # Layer rank
     "results/layer_rank_correlation.json",
     "results/layer_rank_correlation.png",
