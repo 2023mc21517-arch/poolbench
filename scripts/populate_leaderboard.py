@@ -39,6 +39,7 @@ LEADERBOARD_DIR     = BASE_DIR / "leaderboard" / "official"
 SUMMARY_PATH        = LEADERBOARD_DIR / "poolbench_v1.json"
 FULL_PATH           = LEADERBOARD_DIR / "poolbench_v1_full.json"
 RANKINGS_PATH       = LEADERBOARD_DIR / "poolbench_v1_rankings.json"
+MASTER_PATH         = LEADERBOARD_DIR / "poolbench_v1_master.json"
 
 MODEL_TO_LEADERBOARD_KEY: dict[str, str] = {
     "llama3_8b":  "model_A",
@@ -190,6 +191,37 @@ def _write_full(leaderboard: dict, model_name: str, lb_key: str,
     }
 
 
+def _build_master_table(all_model_data: dict[str, dict],
+                        ranked_strategies: list[str]) -> dict:
+    """
+    Build master_table[model_key][strategy][concept] = {D1, D2_scp_c, D2_M_c, D2_phi_c, D3_LD, D3_LC}
+    Axis order: model → strategy → concept → metrics.
+    """
+    master: dict[str, dict] = {}
+    for model_name, lb_key in MODEL_TO_LEADERBOARD_KEY.items():
+        if model_name not in all_model_data:
+            continue
+        per_concept = all_model_data[model_name]["per_concept"]  # concept → strategy → metrics
+        model_block: dict[str, dict] = {}
+        for s in ranked_strategies:
+            strat_block: dict[str, dict] = {}
+            for concept in sorted(per_concept):
+                strat_block[concept] = per_concept[concept][s]       # {D1_auroc, D2_scp_c, ...}
+            # Also add cross-concept mean row
+            means = all_model_data[model_name]["means"][s]
+            strat_block["_mean"] = {
+                "D1_auroc":  means["D1_mean_auroc"],
+                "D2_scp_c":  means["D2_mean_scp_c"],
+                "D2_M_c":    means["D2_mean_M_c"],
+                "D2_phi_c":  means["D2_mean_phi_c"],
+                "D3_LD":     means["D3_mean_LD"],
+                "D3_LC":     means["D3_mean_LC"],
+            }
+            model_block[s] = strat_block
+        master[lb_key] = model_block
+    return master
+
+
 def _build_rankings(all_model_data: dict[str, dict],
                     ranked_strategies: list[str]) -> list[dict]:
     """Cross-model mean of each metric per strategy, sorted by D1 descending."""
@@ -251,6 +283,7 @@ def main() -> None:
     summary_lb   = _load_json(SUMMARY_PATH)   or {}
     full_lb      = _load_json(FULL_PATH)      or {"models": {}}
     rankings_lb  = _load_json(RANKINGS_PATH)  or {}
+    master_lb    = _load_json(MASTER_PATH)    or {}
 
     all_model_data: dict[str, dict] = {}
     updated: list[str] = []
@@ -297,7 +330,7 @@ def main() -> None:
 
         if not args.dry_run:
             _write_summary(summary_lb, model_name, lb_key, data, args.dry_run)
-            _write_full(full_lb,    model_name, lb_key, data, args.dry_run)
+            _write_full(full_lb,       model_name, lb_key, data, args.dry_run)
 
     if not updated:
         print("\nNo models had results — nothing written.")
@@ -319,17 +352,31 @@ def main() -> None:
         rankings_lb["ranked_strategies"] = ranked
         rankings_lb["models_included"]   = [MODEL_TO_LEADERBOARD_KEY[m] for m in all_model_data]
 
+        # Build and write master table (model → strategy → concept → metrics + leaderboard)
+        master_table = _build_master_table(all_model_data, RANKED_STRATEGIES)
+        master_lb["_description"] = (
+            "Master table: master_table[model][strategy][concept] = "
+            "{D1_auroc, D2_scp_c, D2_M_c, D2_phi_c, D3_LD, D3_LC}. "
+            "'_mean' key under each strategy = cross-concept mean. "
+            "leaderboard = ranked strategy summary (cross-model D1 descending)."
+        )
+        master_lb["master_table"] = master_table
+        master_lb["leaderboard"]  = ranked
+
         with open(SUMMARY_PATH, "w") as f:
             json.dump(summary_lb, f, indent=2)
         with open(FULL_PATH, "w") as f:
             json.dump(full_lb, f, indent=2)
         with open(RANKINGS_PATH, "w") as f:
             json.dump(rankings_lb, f, indent=2)
+        with open(MASTER_PATH, "w") as f:
+            json.dump(master_lb, f, indent=2)
 
         print(f"\nWrote:")
         print(f"  {SUMMARY_PATH.name}")
         print(f"  {FULL_PATH.name}")
         print(f"  {RANKINGS_PATH.name}")
+        print(f"  {MASTER_PATH.name}")
     else:
         print("\n[dry_run] No files written.")
 
