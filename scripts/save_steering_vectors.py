@@ -32,7 +32,7 @@ OUT_DIR     = RESULTS_DIR / "steering_vectors"
 
 MODEL_BEST_LAYERS = {
     "mistral_7b": 16,
-    "llama3_8b":  None,   # update once D1 finishes
+    "llama3_8b":  31,
     "gemma2_9b":  28,
 }
 

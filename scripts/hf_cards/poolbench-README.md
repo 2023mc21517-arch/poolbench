@@ -22,8 +22,6 @@ size_categories:
 Every embedding pipeline implicitly chooses a pooling strategy — last token, mean pooling, attention-weighted, etc. — yet this choice is almost never studied systematically.
 PoolBench provides the first controlled, multi-concept, multi-model evaluation framework for this decision.
 
-Submitted to the **NeurIPS 2026 Datasets & Benchmarks Track**.
-
 ---
 
 ## What is a pooling strategy?
@@ -160,7 +158,7 @@ Positive and negative passages were constructed under strict controls:
 - **MD5-based deduplication** — within-class, cross-class, and train/test leak checks
 - **Seed-word contamination filter** — negatives must not contain the concept's seed words
 
-See the [GitHub repository](https://github.com/2023mc21517-arch/poolbench) for full construction notes and per-concept source tables.
+See the [code repository](https://anonymous.4open.science/r/poolbench-B36C) for full construction notes and per-concept source tables.
 
 ### Source datasets
 
@@ -202,7 +200,7 @@ for concept in concepts:
 
 To reproduce the full pipeline from activations to leaderboard:
 ```bash
-git clone https://github.com/2023mc21517-arch/poolbench.git
+git clone https://anonymous.4open.science/r/poolbench-B36C
 cd poolbench
 pip install -e ".[dev]"
 
@@ -223,7 +221,7 @@ python scripts/run_model.py --model mistral7b --device cuda:0
 | Activation Files | [nips234678/poolbench-activations](https://huggingface.co/datasets/nips234678/poolbench-activations) | Per-model per-layer hidden states (.npy) for all 3 models — enables D1 evaluation without re-running inference (~390 GB) |
 | Steered Outputs | [nips234678/poolbench-steered-outputs](https://huggingface.co/datasets/nips234678/poolbench-steered-outputs) | Generated texts from D2 SCP evaluation for 15 non-sensitive concepts across all 3 models |
 | Steering Vectors | [nips234678/poolbench-steering-vectors](https://huggingface.co/datasets/nips234678/poolbench-steering-vectors) | DiffMean steering vectors (.npy) for all 17 concepts × 19 strategies × 3 models at best layer |
-| Code & Leaderboard | [GitHub](https://github.com/2023mc21517-arch/poolbench) | Evaluation pipeline, pooling strategy implementations, community submission workflow |
+| Code & Leaderboard | [Anonymous Repository](https://anonymous.4open.science/r/poolbench-B36C) | Evaluation pipeline, pooling strategy implementations, community submission workflow |
 
 ---
 
@@ -245,7 +243,7 @@ python scripts/run_model.py --model mistral7b --device cuda:0
   year         = {2026},
   publisher    = {HuggingFace},
   url          = {https://huggingface.co/datasets/nips234678/poolbench},
-  note         = {Submitted to NeurIPS 2026 Datasets \& Benchmarks Track}
+  note         = {Under review}
 }
 ```
 
