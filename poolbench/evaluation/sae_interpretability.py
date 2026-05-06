@@ -244,13 +244,7 @@ def analyse_steering_vectors(
         except Exception:
             existing = {}
 
-    sae = load_sae(model_name, layer)
-    if sae is None:
-        log.warning(
-            f"[sae_interp] No SAE available for {model_name} L{layer}. "
-            "Skipping SAE interpretability analysis."
-        )
-        return {}
+    sae = load_sae(model_name, layer)  # raises RuntimeError if unavailable
 
     results: dict = dict(existing)
     total = len(concepts) * len(strategy_ids)

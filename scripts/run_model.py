@@ -932,10 +932,7 @@ def step_sae_interpretability(
             out_dir      = SAE_INTERP_DIR,
             skip_existing = skip_existing,
         )
-    if results:
-        log.info(f"  Step 8 done — {len(results)} concepts analysed.")
-    else:
-        log.info("  Step 8 skipped (SAE unavailable or all cached).")
+    log.info(f"  Step 8 done — {len(results)} concepts analysed.")
     return results
 
 

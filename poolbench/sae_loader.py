@@ -73,31 +73,25 @@ def load_sae(model_name: str, layer: int):
 
     cfg = _SAE_RELEASES.get(model_name)
     if cfg is None:
-        log.warning(
+        raise RuntimeError(
             f"[sae_loader] No public SAE release registered for '{model_name}'. "
-            "C5 will fall back to C1 DifMean."
+            "Run with --skip_sae_interp if you want to skip Step 8."
         )
-        _sae_cache[cache_key] = None
-        return None
 
     if layer not in cfg["layers"]:
-        log.warning(
+        raise RuntimeError(
             f"[sae_loader] Layer {layer} not in supported SAE layers {cfg['layers']} "
-            f"for '{model_name}'. C5 will fall back to C1 DifMean."
+            f"for '{model_name}'. Run with --skip_sae_interp if you want to skip Step 8."
         )
-        _sae_cache[cache_key] = None
-        return None
 
     try:
         from sae_lens import SAE  # noqa: PLC0415
     except ImportError:
-        log.warning(
+        raise RuntimeError(
             "[sae_loader] sae-lens is not installed. "
             "Install with: pip install 'poolbench[sae]' or pip install sae-lens>=3.0.0 . "
-            "C5 will fall back to C1 DifMean."
+            "Run with --skip_sae_interp if you want to skip Step 8."
         )
-        _sae_cache[cache_key] = None
-        return None
 
     release = cfg["release"]
     sae_id  = cfg["sae_id_tpl"].format(layer=layer)
@@ -118,8 +112,11 @@ def load_sae(model_name: str, layer: int):
             f"(release={release}, sae_id={sae_id}): {exc}. "
             "C5 will fall back to C1 DifMean."
         )
-        _sae_cache[cache_key] = None
-        return None
+        raise RuntimeError(
+            f"[sae_loader] Failed to load SAE for {model_name} L{layer} "
+            f"(release={release}, sae_id={sae_id}): {exc}. "
+            "Run with --skip_sae_interp if you want to skip Step 8."
+        ) from exc
 
     _sae_cache[cache_key] = sae
     return sae
