@@ -41,13 +41,13 @@ _SAE_RELEASES: dict[str, dict] = {
     },
     "llama3_8b": {
         "release":   "llama_scope_lxr_8x",
-        "sae_id_tpl": "blocks.{layer}.hook_resid_post",
+        "sae_id_tpl": "l{layer}r_8x",
         "layers":    [16, 24, 31],
     },
     "gemma2_9b": {
-        "release":   "gemma-scope-9b-pt-res",
-        "sae_id_tpl": "blocks.{layer}.hook_resid_post",
-        "layers":    [14, 28, 41],
+        "release":   "gemma-scope-9b-pt-res-canonical",
+        "sae_id_tpl": "layer_{layer}/width_16k/canonical",
+        "layers":    [14, 20, 28],
     },
 }
 # fmt: on
@@ -107,11 +107,6 @@ def load_sae(model_name: str, layer: int):
             f"d_in={sae.cfg.d_in}  d_sae={sae.cfg.d_sae}"
         )
     except Exception as exc:
-        log.warning(
-            f"[sae_loader] Failed to load SAE for {model_name} L{layer} "
-            f"(release={release}, sae_id={sae_id}): {exc}. "
-            "C5 will fall back to C1 DifMean."
-        )
         raise RuntimeError(
             f"[sae_loader] Failed to load SAE for {model_name} L{layer} "
             f"(release={release}, sae_id={sae_id}): {exc}. "
