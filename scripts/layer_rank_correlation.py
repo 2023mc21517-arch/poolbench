@@ -226,6 +226,20 @@ def main() -> None:
     plt.savefig(out_path, dpi=150, bbox_inches="tight")
     print(f"\nHeatmap saved → {out_path}")
 
+    # Save numeric results to JSON
+    json_path = out_path.with_suffix(".json")
+    json_data = {
+        model: [
+            {"layer_a": la, "layer_b": lb, "spearman_rho": rho, "p_value": pval}
+            for la, lb, rho, pval in corrs
+        ]
+        for model, corrs in all_corr_data.items()
+    }
+    with open(json_path, "w") as f:
+        import json as _json
+        _json.dump(json_data, f, indent=2)
+    print(f"Results saved → {json_path}")
+
 
 if __name__ == "__main__":
     main()
