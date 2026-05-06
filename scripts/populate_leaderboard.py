@@ -336,6 +336,31 @@ def main() -> None:
         print("\nNo models had results — nothing written.")
         return
 
+    # Build and print master table (model → strategy → concept → metrics)
+    master_table = _build_master_table(all_model_data, RANKED_STRATEGIES)
+    print(f"\n{'█'*55}")
+    print("  MASTER TABLE  (model × strategy × concept → metrics)\n")
+    hdr = f"  {'Model':<10}  {'Strategy':<28}  {'Concept':<24}  {'D1':>8}  {'D2_scp':>8}  {'D2_Mc':>7}  {'D2_phi':>7}  {'D3_LD':>8}  {'D3_LC':>8}"
+    print(hdr)
+    print(f"  {'─'*len(hdr)}")
+    def _fmt(v): return f"{float(v):.5f}" if v is not None else "   None"
+    for lb_key, strat_dict in master_table.items():
+        for s in RANKED_STRATEGIES:
+            concept_dict = strat_dict[s]
+            # Regular concepts first (sorted), then _mean last
+            for concept in sorted(k for k in concept_dict if k != "_mean"):
+                c = concept_dict[concept]
+                print(f"  {lb_key:<10}  {s:<28}  {concept:<24}  "
+                      f"{_fmt(c['D1_auroc']):>8}  {_fmt(c['D2_scp_c']):>8}  "
+                      f"{_fmt(c['D2_M_c']):>7}  {_fmt(c['D2_phi_c']):>7}  "
+                      f"{_fmt(c['D3_LD']):>8}  {_fmt(c['D3_LC']):>8}")
+            # Mean row
+            cm = concept_dict["_mean"]
+            print(f"  {lb_key:<10}  {s:<28}  {'[MEAN]':<24}  "
+                  f"{_fmt(cm['D1_auroc']):>8}  {_fmt(cm['D2_scp_c']):>8}  "
+                  f"{_fmt(cm['D2_M_c']):>7}  {_fmt(cm['D2_phi_c']):>7}  "
+                  f"{_fmt(cm['D3_LD']):>8}  {_fmt(cm['D3_LC']):>8}")
+
     # Build rankings across all computed models
     ranked = _build_rankings(all_model_data, RANKED_STRATEGIES)
     print(f"\n{'═'*55}")
@@ -352,8 +377,7 @@ def main() -> None:
         rankings_lb["ranked_strategies"] = ranked
         rankings_lb["models_included"]   = [MODEL_TO_LEADERBOARD_KEY[m] for m in all_model_data]
 
-        # Build and write master table (model → strategy → concept → metrics + leaderboard)
-        master_table = _build_master_table(all_model_data, RANKED_STRATEGIES)
+        # Write master table (model → strategy → concept → metrics + leaderboard)
         master_lb["_description"] = (
             "Master table: master_table[model][strategy][concept] = "
             "{D1_auroc, D2_scp_c, D2_M_c, D2_phi_c, D3_LD, D3_LC}. "
