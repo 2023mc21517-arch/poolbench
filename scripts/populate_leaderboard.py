@@ -76,6 +76,11 @@ def _mean_auroc_per_strategy(best_layer_data: dict) -> dict[str, float | None]:
 
     per_strategy: dict[str, list[float]] = {s: [] for s in RANKED_STRATEGIES}
     for key, auroc_val in layer_results.items():
+        # Values are either a raw float or a dict like {"auroc": <float>, ...}
+        if isinstance(auroc_val, dict):
+            auroc_val = auroc_val.get("auroc")
+        if auroc_val is None:
+            continue
         for strategy_id in RANKED_STRATEGIES:
             if key.endswith(f"_{strategy_id}"):
                 per_strategy[strategy_id].append(float(auroc_val))
