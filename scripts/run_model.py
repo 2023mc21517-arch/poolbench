@@ -452,11 +452,75 @@ def step_pool_and_auroc(model_name: str, construction_method: str = DEFAULT_CONS
             "layer_selection_strategies": LAYER_SELECTION_STRATEGIES,
         }, f, indent=2)
 
+    # Save direction vectors for C2-C5 using the pooled cache (fast — pure numpy)
+    if not _is_primary and concept_filter is None:
+        _save_sweep_vectors(model_name, construction_method, best_layer,
+                           _pool_cache_dir, device)
+
     # Release SAE objects so GPU memory is free for subsequent steps
     if construction_method == "C5_sae_feature":
         clear_sae_cache()
 
     return {"best_layer": best_layer, "per_layer": per_layer_results}
+
+
+def _save_sweep_vectors(model_name: str, construction_method: str, best_layer: int,
+                        pool_cache_dir: Path, device: str = "cpu") -> None:
+    """Save (d_model,) direction vectors for a C2-C5 method from the pooled cache.
+
+    Output: results/steering_vectors/{construction_method}/{model}/layer_{N}/{concept}.npy
+    Skips concepts that already have a .npy file (resumable).
+    """
+    from poolbench.construction.methods import CONSTRUCTION_METHODS  # noqa: PLC0415
+
+    cache_path = pool_cache_dir / f"layer_{best_layer}_pooled.pkl"
+    if not cache_path.exists():
+        log.warning(f"  [sv] No pooled cache at {cache_path} — skipping vector save for {construction_method}")
+        return
+
+    sv_dir = RESULTS_DIR / "steering_vectors" / construction_method / model_name / f"layer_{best_layer}"
+    sv_dir.mkdir(parents=True, exist_ok=True)
+
+    with open(cache_path, "rb") as _f:
+        cached = pickle.load(_f)
+    train_pooled = cached["train"]  # {concept_strategy: {pos_pooled, neg_pooled}}
+
+    construct_fn = CONSTRUCTION_METHODS[construction_method]
+
+    sae_model = None
+    if construction_method == "C5_sae_feature":
+        try:
+            from poolbench.sae_loader import load_sae  # noqa: PLC0415
+            sae_model = load_sae(model_name, best_layer)
+        except Exception as _e:
+            log.warning(f"  [sv] SAE unavailable for C5 vector save: {_e}")
+
+    saved = skipped = 0
+    for concept_name in CONCEPTS:
+        out_path = sv_dir / f"{concept_name}.npy"
+        if out_path.exists():
+            skipped += 1
+            continue
+        entry = train_pooled.get(f"{concept_name}_A1_mean")
+        if entry is None:
+            log.warning(f"  [sv] No A1_mean cache entry for {concept_name} — skipping")
+            continue
+        pos_pooled = entry["pos_pooled"]
+        neg_pooled = entry["neg_pooled"]
+        try:
+            if construction_method == "C5_sae_feature":
+                sv = construct_fn(pos_pooled, neg_pooled, sae_model)
+            else:
+                sv = construct_fn(pos_pooled, neg_pooled)
+        except Exception as _e:
+            log.warning(f"  [sv] {concept_name}/{construction_method} failed: {_e}")
+            continue
+        if sv is None:
+            log.warning(f"  [sv] {concept_name}/{construction_method} returned None — skipping")
+            continue
+        np.save(out_path, sv.astype(np.float32))
+        saved += 1
+    log.info(f"  [sv] {construction_method}/{model_name}/layer_{best_layer}: {saved} saved, {skipped} already existed")
 
 
 def _select_methodology_layer(per_layer_results: dict[int, dict],
