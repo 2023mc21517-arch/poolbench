@@ -222,6 +222,7 @@ python scripts/run_model.py --model mistral7b --device cuda:0
 | BERT Scorer Models (D2) | [nips234678/poolbench-bert-scorers](https://huggingface.co/nips234678/poolbench-bert-scorers) | 17 fine-tuned BERT classifiers (one per concept) used as Classifier B for D2 SCP scoring |
 | Activation Files | [nips234678/poolbench-activations](https://huggingface.co/datasets/nips234678/poolbench-activations) | Per-model per-layer hidden states (.npy) for all 3 models — enables D1 evaluation without re-running inference (~390 GB) |
 | Steered Outputs | [nips234678/poolbench-steered-outputs](https://huggingface.co/datasets/nips234678/poolbench-steered-outputs) | Generated texts from D2 SCP evaluation for 15 non-sensitive concepts across all 3 models |
+| Steering Vectors | [nips234678/poolbench-steering-vectors](https://huggingface.co/datasets/nips234678/poolbench-steering-vectors) | DiffMean steering vectors (.npy) for all 17 concepts × 19 strategies × 3 models at best layer |
 | Code & Leaderboard | [GitHub](https://github.com/2023mc21517-arch/poolbench) | Evaluation pipeline, pooling strategy implementations, community submission workflow |
 
 ---

@@ -17,26 +17,34 @@ HF_TOKEN="${2:?Pass HF token as second arg}"
 HF_USER="${3:?Pass HF username as third arg}"
 
 MODELS=("mistral_7b" "llama3_8b" "gemma2_9b")
+LOG_DIR="logs/post_pipeline"
+mkdir -p "$LOG_DIR"
 
-# ── 1. Save ITI head scores (all 3 models) ────────────────────────────────────
-echo "=== [1/4] Saving ITI head scores ==="
+# ── 1. Save ITI head scores (all 3 models in parallel) ────────────────────────
+echo "=== [1/3] Saving ITI head scores (parallel) ==="
 for MODEL in "${MODELS[@]}"; do
-    echo "  → $MODEL"
-    python scripts/save_iti_scores.py --model "$MODEL" --device "$DEVICE"
+    LOG="$LOG_DIR/${MODEL}_iti.log"
+    echo "  → $MODEL  (log: $LOG)"
+    python scripts/save_iti_scores.py --model "$MODEL" --device "$DEVICE" 2>&1 | tee "$LOG" &
 done
+wait
+echo "  ITI scores done."
 
-# ── 2. Save steering vectors (all 3 models) ───────────────────────────────────
+# ── 2. Save steering vectors (all 3 models in parallel) ───────────────────────
 echo ""
-echo "=== [2/4] Saving steering vectors ==="
+echo "=== [2/3] Saving steering vectors (parallel) ==="
 for MODEL in "${MODELS[@]}"; do
-    echo "  → $MODEL"
-    python scripts/save_steering_vectors.py --model "$MODEL" --device "$DEVICE"
+    LOG="$LOG_DIR/${MODEL}_sv.log"
+    echo "  → $MODEL  (log: $LOG)"
+    python scripts/save_steering_vectors.py --model "$MODEL" --device "$DEVICE" 2>&1 | tee "$LOG" &
 done
+wait
+echo "  Steering vectors done."
 
 # ── 3. Upload steering vectors to HuggingFace ────────────────────────────────
 # (activations + bert-scorers already uploaded; SCP/D3 JSONs go to git repo)
 echo ""
-echo "=== [3/4] Uploading steering vectors to HuggingFace ==="
+echo "=== [3/3] Uploading steering vectors to HuggingFace ==="
 python scripts/upload_to_hf.py --token "$HF_TOKEN" --user "$HF_USER" --only steering-vectors
 
 echo ""
