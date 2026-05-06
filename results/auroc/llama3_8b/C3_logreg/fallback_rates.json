@@ -1,0 +1,17 @@
+{
+  "rates": {
+    "L1_POS_filtered": 0.0,
+    "L2_dependency_rel": 1.0,
+    "L3_named_entity": 0.001004016064257028,
+    "L4_subword_root": 0.0,
+    "L5_SVO": 0.0
+  },
+  "counts": {
+    "L1_POS_filtered": 0,
+    "L2_dependency_rel": 5976,
+    "L3_named_entity": 6,
+    "L4_subword_root": 0,
+    "L5_SVO": 0
+  },
+  "total": 5976
+}

@@ -1,0 +1,22 @@
+{
+  "_metadata": {
+    "prompt_set": "curated_v1"
+  },
+  "hedging": -0.00644,
+  "legal_formality": 0.00347,
+  "frustration": 0.34188,
+  "imdb_sentiment": 0.06615,
+  "toxicity": 0.01491,
+  "depression": 0.13528,
+  "causation": 0.01238,
+  "contrast": 0.42991,
+  "conditionality": 0.31427,
+  "academic_tone": -0.15248,
+  "code_docs": -0.0103,
+  "bureaucratic": 0.01124,
+  "narrative": 0.07885,
+  "deference": -0.19575,
+  "planning": -0.0118,
+  "negation_density": -0.02012,
+  "numerical_precision": 0.19341
+}

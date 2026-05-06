@@ -1,9 +1,698 @@
 {
-  "_comment": "PoolBench v1 — ranked strategy summary. Cross-model mean of D1/D2/D3. Run scripts/populate_leaderboard.py to fill.",
+  "_comment": "PoolBench v1 \u2014 ranked strategy summary. Cross-model mean of D1/D2/D3. Run scripts/populate_leaderboard.py to fill.",
   "_note": "Strategies ranked by cross-model mean D1 AUROC (descending). D2 and D3 are secondary quality dimensions. Higher D1 = better concept separation. Higher D2 = steering more effective. D3 closer to 1.0 = more specific (less collateral leakage).",
   "version": "1.0",
   "date": "2026-05-06",
   "construction_method": "C1_difmean",
-  "models_included": ["model_A", "model_B", "model_C"],
-  "ranked_strategies": []
+  "models_included": [
+    "model_A",
+    "model_B",
+    "model_C"
+  ],
+  "ranked_strategies": [
+    {
+      "rank": 1,
+      "strategy": "W4_hierarchical",
+      "family": "window",
+      "supervision": "unsupervised",
+      "cross_model_D1_auroc": 0.77987,
+      "cross_model_D2_scp_c": 0.01167,
+      "cross_model_D3_LD": 1.06602,
+      "cross_model_D3_LC": 0.84947,
+      "per_model": {
+        "model_A": {
+          "D1_mean_auroc": 0.78018,
+          "D2_mean_scp_c": -0.01517,
+          "D2_mean_M_c": 0.11851,
+          "D2_mean_phi_c": 1.01076,
+          "D3_mean_LD": 0.14393,
+          "D3_mean_LC": 0.2417
+        },
+        "model_B": {
+          "D1_mean_auroc": 0.78363,
+          "D2_mean_scp_c": -0.00322,
+          "D2_mean_M_c": 0.10732,
+          "D2_mean_phi_c": 0.96184,
+          "D3_mean_LD": 1.63971,
+          "D3_mean_LC": 0.98577
+        },
+        "model_C": {
+          "D1_mean_auroc": 0.7758,
+          "D2_mean_scp_c": 0.05339,
+          "D2_mean_M_c": 0.2729,
+          "D2_mean_phi_c": 0.97184,
+          "D3_mean_LD": 1.41441,
+          "D3_mean_LC": 1.32093
+        }
+      }
+    },
+    {
+      "rank": 2,
+      "strategy": "S3_ITI_exact",
+      "family": "saliency_weighted_supervised",
+      "supervision": "supervised",
+      "cross_model_D1_auroc": 0.77274,
+      "cross_model_D2_scp_c": -0.001,
+      "cross_model_D3_LD": 0.33041,
+      "cross_model_D3_LC": 0.44755,
+      "per_model": {
+        "model_A": {
+          "D1_mean_auroc": 0.77721,
+          "D2_mean_scp_c": -0.01224,
+          "D2_mean_M_c": -0.00084,
+          "D2_mean_phi_c": 1.01512,
+          "D3_mean_LD": -0.20768,
+          "D3_mean_LC": 0.73579
+        },
+        "model_B": {
+          "D1_mean_auroc": 0.76497,
+          "D2_mean_scp_c": -0.00688,
+          "D2_mean_M_c": 0.03231,
+          "D2_mean_phi_c": 0.9616,
+          "D3_mean_LD": 1.07581,
+          "D3_mean_LC": 0.99614
+        },
+        "model_C": {
+          "D1_mean_auroc": 0.77603,
+          "D2_mean_scp_c": 0.01613,
+          "D2_mean_M_c": 0.19151,
+          "D2_mean_phi_c": 0.97431,
+          "D3_mean_LD": 0.1231,
+          "D3_mean_LC": -0.38929
+        }
+      }
+    },
+    {
+      "rank": 3,
+      "strategy": "S1_attention_weighted",
+      "family": "saliency_weighted",
+      "supervision": "unsupervised",
+      "cross_model_D1_auroc": 0.77025,
+      "cross_model_D2_scp_c": 0.00023,
+      "cross_model_D3_LD": 0.87566,
+      "cross_model_D3_LC": 0.94386,
+      "per_model": {
+        "model_A": {
+          "D1_mean_auroc": 0.77474,
+          "D2_mean_scp_c": -0.01103,
+          "D2_mean_M_c": -0.13615,
+          "D2_mean_phi_c": 1.00835,
+          "D3_mean_LD": 0.59507,
+          "D3_mean_LC": 0.8839
+        },
+        "model_B": {
+          "D1_mean_auroc": 0.76497,
+          "D2_mean_scp_c": -0.00688,
+          "D2_mean_M_c": 0.03231,
+          "D2_mean_phi_c": 0.9616,
+          "D3_mean_LD": 1.07581,
+          "D3_mean_LC": 0.99614
+        },
+        "model_C": {
+          "D1_mean_auroc": 0.77103,
+          "D2_mean_scp_c": 0.01861,
+          "D2_mean_M_c": 0.06622,
+          "D2_mean_phi_c": 0.96285,
+          "D3_mean_LD": 0.9561,
+          "D3_mean_LC": 0.95154
+        }
+      }
+    },
+    {
+      "rank": 4,
+      "strategy": "A1_mean",
+      "family": "uniform_aggregation",
+      "supervision": "unsupervised",
+      "cross_model_D1_auroc": 0.76998,
+      "cross_model_D2_scp_c": 0.01607,
+      "cross_model_D3_LD": 0.69323,
+      "cross_model_D3_LC": 1.32992,
+      "per_model": {
+        "model_A": {
+          "D1_mean_auroc": 0.76732,
+          "D2_mean_scp_c": -0.00254,
+          "D2_mean_M_c": 0.18518,
+          "D2_mean_phi_c": 1.00024,
+          "D3_mean_LD": 0.26208,
+          "D3_mean_LC": 0.3511
+        },
+        "model_B": {
+          "D1_mean_auroc": 0.77505,
+          "D2_mean_scp_c": -0.00171,
+          "D2_mean_M_c": -0.04221,
+          "D2_mean_phi_c": 0.96524,
+          "D3_mean_LD": 1.38557,
+          "D3_mean_LC": 1.97216
+        },
+        "model_C": {
+          "D1_mean_auroc": 0.76758,
+          "D2_mean_scp_c": 0.05247,
+          "D2_mean_M_c": 0.35952,
+          "D2_mean_phi_c": 0.95878,
+          "D3_mean_LD": 0.43204,
+          "D3_mean_LC": 1.66649
+        }
+      }
+    },
+    {
+      "rank": 5,
+      "strategy": "L2_dependency_rel",
+      "family": "structural_linguistic",
+      "supervision": "unsupervised",
+      "cross_model_D1_auroc": 0.76998,
+      "cross_model_D2_scp_c": 0.01607,
+      "cross_model_D3_LD": 0.69323,
+      "cross_model_D3_LC": 1.32992,
+      "per_model": {
+        "model_A": {
+          "D1_mean_auroc": 0.76732,
+          "D2_mean_scp_c": -0.00254,
+          "D2_mean_M_c": 0.18518,
+          "D2_mean_phi_c": 1.00024,
+          "D3_mean_LD": 0.26208,
+          "D3_mean_LC": 0.3511
+        },
+        "model_B": {
+          "D1_mean_auroc": 0.77505,
+          "D2_mean_scp_c": -0.00171,
+          "D2_mean_M_c": -0.04221,
+          "D2_mean_phi_c": 0.96524,
+          "D3_mean_LD": 1.38557,
+          "D3_mean_LC": 1.97216
+        },
+        "model_C": {
+          "D1_mean_auroc": 0.76758,
+          "D2_mean_scp_c": 0.05247,
+          "D2_mean_M_c": 0.35952,
+          "D2_mean_phi_c": 0.95878,
+          "D3_mean_LD": 0.43204,
+          "D3_mean_LC": 1.66649
+        }
+      }
+    },
+    {
+      "rank": 6,
+      "strategy": "A4_norm",
+      "family": "uniform_aggregation",
+      "supervision": "unsupervised",
+      "cross_model_D1_auroc": 0.76924,
+      "cross_model_D2_scp_c": 0.01564,
+      "cross_model_D3_LD": 0.39638,
+      "cross_model_D3_LC": 1.2222,
+      "per_model": {
+        "model_A": {
+          "D1_mean_auroc": 0.76751,
+          "D2_mean_scp_c": -0.01143,
+          "D2_mean_M_c": 0.06376,
+          "D2_mean_phi_c": 1.03595,
+          "D3_mean_LD": 0.18402,
+          "D3_mean_LC": 1.77853
+        },
+        "model_B": {
+          "D1_mean_auroc": 0.7733,
+          "D2_mean_scp_c": 0.00675,
+          "D2_mean_M_c": 0.02333,
+          "D2_mean_phi_c": 0.96898,
+          "D3_mean_LD": 1.44954,
+          "D3_mean_LC": 0.49279
+        },
+        "model_C": {
+          "D1_mean_auroc": 0.76692,
+          "D2_mean_scp_c": 0.0516,
+          "D2_mean_M_c": 0.48679,
+          "D2_mean_phi_c": 0.95645,
+          "D3_mean_LD": -0.44443,
+          "D3_mean_LC": 1.39528
+        }
+      }
+    },
+    {
+      "rank": 7,
+      "strategy": "L4_subword_root",
+      "family": "structural_linguistic",
+      "supervision": "unsupervised",
+      "cross_model_D1_auroc": 0.7688,
+      "cross_model_D2_scp_c": 0.01043,
+      "cross_model_D3_LD": 1.05023,
+      "cross_model_D3_LC": 1.06001,
+      "per_model": {
+        "model_A": {
+          "D1_mean_auroc": 0.76655,
+          "D2_mean_scp_c": -0.00927,
+          "D2_mean_M_c": 0.24931,
+          "D2_mean_phi_c": 1.0168,
+          "D3_mean_LD": 0.62135,
+          "D3_mean_LC": 1.09946
+        },
+        "model_B": {
+          "D1_mean_auroc": 0.77418,
+          "D2_mean_scp_c": 0.0021,
+          "D2_mean_M_c": -0.03125,
+          "D2_mean_phi_c": 0.96318,
+          "D3_mean_LD": 1.11229,
+          "D3_mean_LC": 1.04211
+        },
+        "model_C": {
+          "D1_mean_auroc": 0.76567,
+          "D2_mean_scp_c": 0.03846,
+          "D2_mean_M_c": 0.36363,
+          "D2_mean_phi_c": 0.96444,
+          "D3_mean_LD": 1.41705,
+          "D3_mean_LC": 1.03845
+        }
+      }
+    },
+    {
+      "rank": 8,
+      "strategy": "L1_POS_filtered",
+      "family": "structural_linguistic",
+      "supervision": "unsupervised",
+      "cross_model_D1_auroc": 0.76838,
+      "cross_model_D2_scp_c": 0.01415,
+      "cross_model_D3_LD": 1.24183,
+      "cross_model_D3_LC": 1.49792,
+      "per_model": {
+        "model_A": {
+          "D1_mean_auroc": 0.76613,
+          "D2_mean_scp_c": -0.00865,
+          "D2_mean_M_c": 0.1888,
+          "D2_mean_phi_c": 1.02235,
+          "D3_mean_LD": 1.00298,
+          "D3_mean_LC": 1.12671
+        },
+        "model_B": {
+          "D1_mean_auroc": 0.77306,
+          "D2_mean_scp_c": 0.00509,
+          "D2_mean_M_c": 0.06148,
+          "D2_mean_phi_c": 0.96025,
+          "D3_mean_LD": 1.05923,
+          "D3_mean_LC": 1.52774
+        },
+        "model_C": {
+          "D1_mean_auroc": 0.76596,
+          "D2_mean_scp_c": 0.046,
+          "D2_mean_M_c": 0.46278,
+          "D2_mean_phi_c": 0.96953,
+          "D3_mean_LD": 1.66329,
+          "D3_mean_LC": 1.83932
+        }
+      }
+    },
+    {
+      "rank": 9,
+      "strategy": "L5_SVO",
+      "family": "structural_linguistic",
+      "supervision": "unsupervised",
+      "cross_model_D1_auroc": 0.76774,
+      "cross_model_D2_scp_c": 0.00887,
+      "cross_model_D3_LD": 0.73274,
+      "cross_model_D3_LC": 1.55494,
+      "per_model": {
+        "model_A": {
+          "D1_mean_auroc": 0.76739,
+          "D2_mean_scp_c": -0.01167,
+          "D2_mean_M_c": 0.25862,
+          "D2_mean_phi_c": 1.01459,
+          "D3_mean_LD": 0.51863,
+          "D3_mean_LC": 1.06739
+        },
+        "model_B": {
+          "D1_mean_auroc": 0.77227,
+          "D2_mean_scp_c": -0.00979,
+          "D2_mean_M_c": 0.04544,
+          "D2_mean_phi_c": 0.9577,
+          "D3_mean_LD": 1.63784,
+          "D3_mean_LC": 1.28204
+        },
+        "model_C": {
+          "D1_mean_auroc": 0.76356,
+          "D2_mean_scp_c": 0.04808,
+          "D2_mean_M_c": 0.32168,
+          "D2_mean_phi_c": 0.97654,
+          "D3_mean_LD": 0.04175,
+          "D3_mean_LC": 2.31539
+        }
+      }
+    },
+    {
+      "rank": 10,
+      "strategy": "W3_mean_last_16",
+      "family": "window",
+      "supervision": "unsupervised",
+      "cross_model_D1_auroc": 0.76593,
+      "cross_model_D2_scp_c": 0.00921,
+      "cross_model_D3_LD": 0.48898,
+      "cross_model_D3_LC": 0.37654,
+      "per_model": {
+        "model_A": {
+          "D1_mean_auroc": 0.7688,
+          "D2_mean_scp_c": -0.01068,
+          "D2_mean_M_c": 0.09085,
+          "D2_mean_phi_c": 1.00378,
+          "D3_mean_LD": 0.59535,
+          "D3_mean_LC": 0.62776
+        },
+        "model_B": {
+          "D1_mean_auroc": 0.7752,
+          "D2_mean_scp_c": -0.007,
+          "D2_mean_M_c": 0.06123,
+          "D2_mean_phi_c": 0.96353,
+          "D3_mean_LD": 0.25029,
+          "D3_mean_LC": -0.45765
+        },
+        "model_C": {
+          "D1_mean_auroc": 0.75378,
+          "D2_mean_scp_c": 0.04531,
+          "D2_mean_M_c": 0.30811,
+          "D2_mean_phi_c": 0.97928,
+          "D3_mean_LD": 0.62131,
+          "D3_mean_LC": 0.95952
+        }
+      }
+    },
+    {
+      "rank": 11,
+      "strategy": "A3_random",
+      "family": "uniform_aggregation",
+      "supervision": "unsupervised",
+      "cross_model_D1_auroc": 0.76489,
+      "cross_model_D2_scp_c": 0.01432,
+      "cross_model_D3_LD": 0.50894,
+      "cross_model_D3_LC": 1.40675,
+      "per_model": {
+        "model_A": {
+          "D1_mean_auroc": 0.76606,
+          "D2_mean_scp_c": -0.01353,
+          "D2_mean_M_c": 0.14138,
+          "D2_mean_phi_c": 1.00716,
+          "D3_mean_LD": 0.17159,
+          "D3_mean_LC": 0.60498
+        },
+        "model_B": {
+          "D1_mean_auroc": 0.77183,
+          "D2_mean_scp_c": -0.00185,
+          "D2_mean_M_c": -0.04129,
+          "D2_mean_phi_c": 0.96416,
+          "D3_mean_LD": 1.34639,
+          "D3_mean_LC": 1.46762
+        },
+        "model_C": {
+          "D1_mean_auroc": 0.75679,
+          "D2_mean_scp_c": 0.05833,
+          "D2_mean_M_c": 0.37515,
+          "D2_mean_phi_c": 0.96161,
+          "D3_mean_LD": 0.00883,
+          "D3_mean_LC": 2.14765
+        }
+      }
+    },
+    {
+      "rank": 12,
+      "strategy": "P1_last_token",
+      "family": "position_anchored",
+      "supervision": "unsupervised",
+      "cross_model_D1_auroc": 0.76398,
+      "cross_model_D2_scp_c": 0.00486,
+      "cross_model_D3_LD": 0.99434,
+      "cross_model_D3_LC": 1.19114,
+      "per_model": {
+        "model_A": {
+          "D1_mean_auroc": 0.77684,
+          "D2_mean_scp_c": -0.01561,
+          "D2_mean_M_c": -0.08039,
+          "D2_mean_phi_c": 1.0071,
+          "D3_mean_LD": -0.30107,
+          "D3_mean_LC": 0.50953
+        },
+        "model_B": {
+          "D1_mean_auroc": 0.76424,
+          "D2_mean_scp_c": -0.00784,
+          "D2_mean_M_c": -0.01801,
+          "D2_mean_phi_c": 0.96763,
+          "D3_mean_LD": 1.81844,
+          "D3_mean_LC": 0.98829
+        },
+        "model_C": {
+          "D1_mean_auroc": 0.75087,
+          "D2_mean_scp_c": 0.03804,
+          "D2_mean_M_c": 0.15635,
+          "D2_mean_phi_c": 0.94888,
+          "D3_mean_LD": 1.46565,
+          "D3_mean_LC": 2.07559
+        }
+      }
+    },
+    {
+      "rank": 13,
+      "strategy": "W2_mean_last_8",
+      "family": "window",
+      "supervision": "unsupervised",
+      "cross_model_D1_auroc": 0.7605,
+      "cross_model_D2_scp_c": 0.00991,
+      "cross_model_D3_LD": 0.27805,
+      "cross_model_D3_LC": 1.15958,
+      "per_model": {
+        "model_A": {
+          "D1_mean_auroc": 0.76749,
+          "D2_mean_scp_c": -0.01549,
+          "D2_mean_M_c": 0.14999,
+          "D2_mean_phi_c": 0.99945,
+          "D3_mean_LD": 0.08417,
+          "D3_mean_LC": 0.43821
+        },
+        "model_B": {
+          "D1_mean_auroc": 0.76973,
+          "D2_mean_scp_c": 0.00301,
+          "D2_mean_M_c": -0.05872,
+          "D2_mean_phi_c": 0.96201,
+          "D3_mean_LD": 1.11307,
+          "D3_mean_LC": 1.59833
+        },
+        "model_C": {
+          "D1_mean_auroc": 0.74427,
+          "D2_mean_scp_c": 0.04222,
+          "D2_mean_M_c": 0.14151,
+          "D2_mean_phi_c": 0.96965,
+          "D3_mean_LD": -0.36309,
+          "D3_mean_LC": 1.4422
+        }
+      }
+    },
+    {
+      "rank": 14,
+      "strategy": "W1_mean_last_4",
+      "family": "window",
+      "supervision": "unsupervised",
+      "cross_model_D1_auroc": 0.75971,
+      "cross_model_D2_scp_c": 0.00527,
+      "cross_model_D3_LD": 0.58698,
+      "cross_model_D3_LC": 0.99062,
+      "per_model": {
+        "model_A": {
+          "D1_mean_auroc": 0.76846,
+          "D2_mean_scp_c": -0.01025,
+          "D2_mean_M_c": 0.28976,
+          "D2_mean_phi_c": 1.00709,
+          "D3_mean_LD": 0.77528,
+          "D3_mean_LC": 0.63982
+        },
+        "model_B": {
+          "D1_mean_auroc": 0.76896,
+          "D2_mean_scp_c": -0.01368,
+          "D2_mean_M_c": 0.07692,
+          "D2_mean_phi_c": 0.96732,
+          "D3_mean_LD": 0.85784,
+          "D3_mean_LC": 1.14619
+        },
+        "model_C": {
+          "D1_mean_auroc": 0.7417,
+          "D2_mean_scp_c": 0.03974,
+          "D2_mean_M_c": 0.14479,
+          "D2_mean_phi_c": 0.95221,
+          "D3_mean_LD": 0.12782,
+          "D3_mean_LC": 1.18586
+        }
+      }
+    },
+    {
+      "rank": 15,
+      "strategy": "A2_max",
+      "family": "uniform_aggregation",
+      "supervision": "unsupervised",
+      "cross_model_D1_auroc": 0.74753,
+      "cross_model_D2_scp_c": 0.00701,
+      "cross_model_D3_LD": 0.80811,
+      "cross_model_D3_LC": 1.00367,
+      "per_model": {
+        "model_A": {
+          "D1_mean_auroc": 0.7506,
+          "D2_mean_scp_c": -0.0159,
+          "D2_mean_M_c": 0.17731,
+          "D2_mean_phi_c": 1.02441,
+          "D3_mean_LD": 0.71574,
+          "D3_mean_LC": 0.67915
+        },
+        "model_B": {
+          "D1_mean_auroc": 0.75266,
+          "D2_mean_scp_c": -0.00523,
+          "D2_mean_M_c": -0.02588,
+          "D2_mean_phi_c": 0.96338,
+          "D3_mean_LD": 1.14083,
+          "D3_mean_LC": 1.74363
+        },
+        "model_C": {
+          "D1_mean_auroc": 0.73934,
+          "D2_mean_scp_c": 0.04217,
+          "D2_mean_M_c": 0.20443,
+          "D2_mean_phi_c": 0.96739,
+          "D3_mean_LD": 0.56775,
+          "D3_mean_LC": 0.58824
+        }
+      }
+    },
+    {
+      "rank": 16,
+      "strategy": "L3_named_entity",
+      "family": "structural_linguistic",
+      "supervision": "unsupervised",
+      "cross_model_D1_auroc": 0.73774,
+      "cross_model_D2_scp_c": 0.0087,
+      "cross_model_D3_LD": 0.87502,
+      "cross_model_D3_LC": 1.19395,
+      "per_model": {
+        "model_A": {
+          "D1_mean_auroc": 0.74302,
+          "D2_mean_scp_c": -0.0108,
+          "D2_mean_M_c": 0.22871,
+          "D2_mean_phi_c": 1.01535,
+          "D3_mean_LD": 1.01831,
+          "D3_mean_LC": 0.63899
+        },
+        "model_B": {
+          "D1_mean_auroc": 0.73954,
+          "D2_mean_scp_c": -0.00645,
+          "D2_mean_M_c": 0.05415,
+          "D2_mean_phi_c": 0.96534,
+          "D3_mean_LD": 1.38799,
+          "D3_mean_LC": 1.38903
+        },
+        "model_C": {
+          "D1_mean_auroc": 0.73067,
+          "D2_mean_scp_c": 0.04336,
+          "D2_mean_M_c": 0.20074,
+          "D2_mean_phi_c": 0.96728,
+          "D3_mean_LD": 0.21875,
+          "D3_mean_LC": 1.55384
+        }
+      }
+    },
+    {
+      "rank": 17,
+      "strategy": "P3_CLS",
+      "family": "position_anchored",
+      "supervision": "unsupervised",
+      "cross_model_D1_auroc": 0.66325,
+      "cross_model_D2_scp_c": 0.00087,
+      "cross_model_D3_LD": 0.84803,
+      "cross_model_D3_LC": 1.48685,
+      "per_model": {
+        "model_A": {
+          "D1_mean_auroc": 0.66235,
+          "D2_mean_scp_c": -0.00279,
+          "D2_mean_M_c": 0.24856,
+          "D2_mean_phi_c": 1.02919,
+          "D3_mean_LD": 1.15064,
+          "D3_mean_LC": 1.59919
+        },
+        "model_B": {
+          "D1_mean_auroc": 0.66689,
+          "D2_mean_scp_c": -0.01171,
+          "D2_mean_M_c": 0.06906,
+          "D2_mean_phi_c": 0.96054,
+          "D3_mean_LD": 1.25639,
+          "D3_mean_LC": 1.54134
+        },
+        "model_C": {
+          "D1_mean_auroc": 0.66052,
+          "D2_mean_scp_c": 0.0171,
+          "D2_mean_M_c": 0.38832,
+          "D2_mean_phi_c": 0.94067,
+          "D3_mean_LD": 0.13705,
+          "D3_mean_LC": 1.32003
+        }
+      }
+    },
+    {
+      "rank": 18,
+      "strategy": "S2_SIF",
+      "family": "saliency_weighted",
+      "supervision": "unsupervised",
+      "cross_model_D1_auroc": 0.60571,
+      "cross_model_D2_scp_c": 0.00038,
+      "cross_model_D3_LD": 0.79264,
+      "cross_model_D3_LC": 0.97475,
+      "per_model": {
+        "model_A": {
+          "D1_mean_auroc": 0.59209,
+          "D2_mean_scp_c": -0.01307,
+          "D2_mean_M_c": 0.26085,
+          "D2_mean_phi_c": 1.01421,
+          "D3_mean_LD": 1.44031,
+          "D3_mean_LC": 1.63824
+        },
+        "model_B": {
+          "D1_mean_auroc": 0.61185,
+          "D2_mean_scp_c": -0.00221,
+          "D2_mean_M_c": 0.02942,
+          "D2_mean_phi_c": 0.95323,
+          "D3_mean_LD": 1.17637,
+          "D3_mean_LC": 0.41852
+        },
+        "model_C": {
+          "D1_mean_auroc": 0.6132,
+          "D2_mean_scp_c": 0.01641,
+          "D2_mean_M_c": 0.23078,
+          "D2_mean_phi_c": 0.96188,
+          "D3_mean_LD": -0.23875,
+          "D3_mean_LC": 0.86749
+        }
+      }
+    },
+    {
+      "rank": 19,
+      "strategy": "P2_first_token",
+      "family": "position_anchored",
+      "supervision": "unsupervised",
+      "cross_model_D1_auroc": 0.50183,
+      "cross_model_D2_scp_c": -0.00528,
+      "cross_model_D3_LD": 0.33791,
+      "cross_model_D3_LC": 0.35585,
+      "per_model": {
+        "model_A": {
+          "D1_mean_auroc": 0.50031,
+          "D2_mean_scp_c": -0.03317,
+          "D2_mean_M_c": -0.02703,
+          "D2_mean_phi_c": 0.99577,
+          "D3_mean_LD": 0.65695,
+          "D3_mean_LC": 0.97767
+        },
+        "model_B": {
+          "D1_mean_auroc": 0.49807,
+          "D2_mean_scp_c": -0.00268,
+          "D2_mean_M_c": 0.1673,
+          "D2_mean_phi_c": 0.97355,
+          "D3_mean_LD": null,
+          "D3_mean_LC": null
+        },
+        "model_C": {
+          "D1_mean_auroc": 0.5071,
+          "D2_mean_scp_c": 0.02001,
+          "D2_mean_M_c": 0.14278,
+          "D2_mean_phi_c": 0.96511,
+          "D3_mean_LD": 0.01886,
+          "D3_mean_LC": -0.26598
+        }
+      }
+    }
+  ]
 }

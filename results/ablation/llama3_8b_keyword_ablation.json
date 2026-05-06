@@ -1,0 +1,51 @@
+{
+  "hedging": {
+    "concept": "hedging",
+    "full_auroc": 0.30060327492099975,
+    "ablated_auroc": 0.47219860193431007,
+    "drop": -0.1716,
+    "signal_in_surface": false
+  },
+  "legal_formality": {
+    "concept": "legal_formality",
+    "full_auroc": 0.34768361581920904,
+    "ablated_auroc": 0.5374576271186441,
+    "drop": -0.1898,
+    "signal_in_surface": false
+  },
+  "frustration": {
+    "concept": "frustration",
+    "full_auroc": 0.9149440515948302,
+    "ablated_auroc": 0.9148715878267142,
+    "drop": 0.0001,
+    "signal_in_surface": false
+  },
+  "causation": {
+    "concept": "causation",
+    "full_auroc": 0.32872258929426407,
+    "ablated_auroc": 0.4232730058412333,
+    "drop": -0.0946,
+    "signal_in_surface": false
+  },
+  "contrast": {
+    "concept": "contrast",
+    "full_auroc": 0.3467532956685499,
+    "ablated_auroc": 0.3635461393596987,
+    "drop": -0.0168,
+    "signal_in_surface": false
+  },
+  "conditionality": {
+    "concept": "conditionality",
+    "full_auroc": 0.3261695745332109,
+    "ablated_auroc": 0.44320416284052644,
+    "drop": -0.117,
+    "signal_in_surface": false
+  },
+  "planning": {
+    "concept": "planning",
+    "full_auroc": 1.0,
+    "ablated_auroc": 1.0,
+    "drop": 0.0,
+    "signal_in_surface": false
+  }
+}

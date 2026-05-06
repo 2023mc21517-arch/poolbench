@@ -1,0 +1,121 @@
+{
+  "hedging": {
+    "concept": "hedging",
+    "passes": true,
+    "linear_auroc": 0.38432303203091966,
+    "mlp_auroc": 0.20515067621289465,
+    "gap": -0.1792
+  },
+  "legal_formality": {
+    "concept": "legal_formality",
+    "passes": false,
+    "linear_auroc": 0.41731443679440094,
+    "mlp_auroc": 0.5504157236390694,
+    "gap": 0.1331
+  },
+  "frustration": {
+    "concept": "frustration",
+    "passes": false,
+    "linear_auroc": 0.873,
+    "mlp_auroc": 0.9474081632653062,
+    "gap": 0.0744
+  },
+  "imdb_sentiment": {
+    "concept": "imdb_sentiment",
+    "passes": false,
+    "linear_auroc": 0.8987755102040816,
+    "mlp_auroc": 0.9789336734693878,
+    "gap": 0.0802
+  },
+  "toxicity": {
+    "concept": "toxicity",
+    "passes": false,
+    "linear_auroc": 0.908387755102041,
+    "mlp_auroc": 0.9744285714285713,
+    "gap": 0.066
+  },
+  "depression": {
+    "concept": "depression",
+    "passes": true,
+    "linear_auroc": 0.9995733249051832,
+    "mlp_auroc": 1.0,
+    "gap": 0.0004
+  },
+  "causation": {
+    "concept": "causation",
+    "passes": true,
+    "linear_auroc": 0.32429599177800617,
+    "mlp_auroc": 0.24267214799588901,
+    "gap": -0.0816
+  },
+  "contrast": {
+    "concept": "contrast",
+    "passes": true,
+    "linear_auroc": 0.34008355083661745,
+    "mlp_auroc": 0.2789889609381354,
+    "gap": -0.0611
+  },
+  "conditionality": {
+    "concept": "conditionality",
+    "passes": true,
+    "linear_auroc": 0.3507755102040816,
+    "mlp_auroc": 0.17646428571428568,
+    "gap": -0.1743
+  },
+  "academic_tone": {
+    "concept": "academic_tone",
+    "passes": true,
+    "linear_auroc": 1.0,
+    "mlp_auroc": 1.0,
+    "gap": 0.0
+  },
+  "code_docs": {
+    "concept": "code_docs",
+    "passes": true,
+    "linear_auroc": 0.9999591836734695,
+    "mlp_auroc": 1.0,
+    "gap": 0.0
+  },
+  "bureaucratic": {
+    "concept": "bureaucratic",
+    "passes": true,
+    "linear_auroc": 1.0,
+    "mlp_auroc": 1.0,
+    "gap": 0.0
+  },
+  "narrative": {
+    "concept": "narrative",
+    "passes": true,
+    "linear_auroc": 0.9996632653061225,
+    "mlp_auroc": 1.0,
+    "gap": 0.0003
+  },
+  "deference": {
+    "concept": "deference",
+    "passes": false,
+    "linear_auroc": 0.9190714285714285,
+    "mlp_auroc": 0.9605459183673469,
+    "gap": 0.0415
+  },
+  "planning": {
+    "concept": "planning",
+    "passes": true,
+    "linear_auroc": 1.0,
+    "mlp_auroc": 1.0,
+    "gap": 0.0
+  },
+  "negation_density": {
+    "concept": "negation_density",
+    "passes": false,
+    "linear_auroc": 0.3930756863896638,
+    "mlp_auroc": 0.5791133460578476,
+    "gap": 0.186
+  },
+  "numerical_precision": {
+    "concept": "numerical_precision",
+    "passes": true,
+    "linear_auroc": 0.9705714285714286,
+    "mlp_auroc": 0.9933775510204083,
+    "gap": 0.0228
+  }
+}
