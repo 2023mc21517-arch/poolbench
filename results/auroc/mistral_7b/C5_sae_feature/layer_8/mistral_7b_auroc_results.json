@@ -300,10 +300,10 @@
     "protocol": "5fold_oof"
   },
   "negation_density_S1_attention_weighted": {
-    "auroc": 0.49356531055843256,
+    "auroc": 0.4935642842921739,
     "ci_low": 0.46407848097921284,
-    "ci_high": 0.5238733895050486,
-    "std": 0.015295992247629226,
+    "ci_high": 0.5238713877162469,
+    "std": 0.015296025579231485,
     "n_train_pos": 699,
     "n_train_neg": 697,
     "n_pos": 300,

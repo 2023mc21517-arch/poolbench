@@ -30,13 +30,7 @@ data/raw/
 
 # Activation .npy files (very large — released on HF Hub)
 results/activations/
-results/auroc/
-results/linearity/
-results/nemenyi/
-results/icc/
 results/bert_classifiers/
-results/scp/
-results/disentanglement/
 results/*.log
 !results/.gitkeep
 
