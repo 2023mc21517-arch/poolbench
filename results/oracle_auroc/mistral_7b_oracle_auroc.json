@@ -1,0 +1,104 @@
+{
+  "hedging": {
+    "16": {
+      "auroc": 0.50377,
+      "strategy": "G1_IxG"
+    }
+  },
+  "legal_formality": {
+    "16": {
+      "auroc": 0.50264,
+      "strategy": "G1_IxG"
+    }
+  },
+  "frustration": {
+    "16": {
+      "auroc": 0.63592,
+      "strategy": "G1_IxG"
+    }
+  },
+  "imdb_sentiment": {
+    "16": {
+      "auroc": 0.8278,
+      "strategy": "G1_IxG"
+    }
+  },
+  "toxicity": {
+    "16": {
+      "auroc": 0.61949,
+      "strategy": "G1_IxG"
+    }
+  },
+  "depression": {
+    "16": {
+      "auroc": 0.83015,
+      "strategy": "G1_IxG"
+    }
+  },
+  "causation": {
+    "16": {
+      "auroc": 0.51252,
+      "strategy": "G1_IxG"
+    }
+  },
+  "contrast": {
+    "16": {
+      "auroc": 0.52424,
+      "strategy": "G1_IxG"
+    }
+  },
+  "conditionality": {
+    "16": {
+      "auroc": 0.49289,
+      "strategy": "G1_IxG"
+    }
+  },
+  "academic_tone": {
+    "16": {
+      "auroc": 0.81835,
+      "strategy": "G1_IxG"
+    }
+  },
+  "code_docs": {
+    "16": {
+      "auroc": 0.87183,
+      "strategy": "G1_IxG"
+    }
+  },
+  "bureaucratic": {
+    "16": {
+      "auroc": 0.78518,
+      "strategy": "G1_IxG"
+    }
+  },
+  "narrative": {
+    "16": {
+      "auroc": 0.82903,
+      "strategy": "G1_IxG"
+    }
+  },
+  "deference": {
+    "16": {
+      "auroc": 0.80354,
+      "strategy": "G1_IxG"
+    }
+  },
+  "planning": {
+    "16": {
+      "auroc": 0.80732,
+      "strategy": "G1_IxG"
+    }
+  },
+  "negation_density": {
+    "16": {
+      "auroc": 0.49599,
+      "strategy": "G1_IxG"
+    }
+  },
+  "numerical_precision": {
+    "16": {
+      "auroc": 0.73928,
+      "strategy": "G1_IxG"
+    }
+  }
+}
