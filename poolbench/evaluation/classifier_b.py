@@ -790,10 +790,14 @@ def train_all_classifiers_b(
     failures = {}
     for concept in CONCEPT_NAMES:
         log.info(f"\n--- Classifier B: {concept} ---")
-        # Always retrain concepts whose anchor construction was corrected post-initial-run
-        concept_force = force_retrain or (concept in ANCHOR_FIXED_CONCEPTS)
-        if concept in ANCHOR_FIXED_CONCEPTS and not force_retrain:
-            log.info(f"  [classifier_b] '{concept}' is in ANCHOR_FIXED_CONCEPTS — forcing retrain")
+        # Force retrain for anchor-corrected concepts only if no checkpoint exists yet
+        anchor_needs_retrain = (
+            concept in ANCHOR_FIXED_CONCEPTS
+            and not _classifier_artifact_complete(Path(classifiers_dir) / concept)
+        )
+        concept_force = force_retrain or anchor_needs_retrain
+        if anchor_needs_retrain and not force_retrain:
+            log.info(f"  [classifier_b] '{concept}' is in ANCHOR_FIXED_CONCEPTS — forcing retrain (no checkpoint)")
         try:
             path = train_classifier_b(concept, classifiers_dir, device,
                                       max_samples, concept_force)
