@@ -282,6 +282,11 @@ def main():
                         help="When --device auto: minimum free VRAM (GB) to accept a GPU")
     parser.add_argument("--force",   action="store_true",
                         help="Ignore existing checkpoints and recompute from scratch")
+    parser.add_argument("--best_layer_only", action="store_true",
+                        help="Only run the single best layer per model (reads from "
+                             "results/auroc/{model}/best_layer_auroc.json). "
+                             "Gives 3× speedup; falls back to all candidate layers if "
+                             "no checkpoint is found.")
     args = parser.parse_args()
 
     # ── Device resolution ───────────────────────────────────────────────────
@@ -304,6 +309,28 @@ def main():
     all_summaries: dict[str, dict] = {}
     for model_name in models_to_run:
         log.info(f"\n{'='*60}\n  ORACLE MODEL: {model_name}\n{'='*60}")
+
+        # ── --best_layer_only: restrict candidate_layers to the single best layer ──
+        if args.best_layer_only:
+            best_layer_path = RESULTS_DIR / "auroc" / model_name / "best_layer_auroc.json"
+            if best_layer_path.exists():
+                try:
+                    with open(best_layer_path) as _f:
+                        _bl = json.load(_f).get("best_layer")
+                    if _bl is not None:
+                        MODEL_CONFIGS[model_name]["candidate_layers"] = [int(_bl)]
+                        log.info(f"  [best_layer_only] {model_name}: restricting to layer {_bl} "
+                                 f"(read from {best_layer_path})")
+                    else:
+                        log.warning(f"  [best_layer_only] {model_name}: 'best_layer' key missing in "
+                                    f"{best_layer_path} — using all candidate layers")
+                except Exception as exc:
+                    log.warning(f"  [best_layer_only] {model_name}: failed to read {best_layer_path} "
+                                f"({exc}) — using all candidate layers")
+            else:
+                log.warning(f"  [best_layer_only] {model_name}: no checkpoint at {best_layer_path} "
+                            f"— using all candidate layers {MODEL_CONFIGS[model_name]['candidate_layers']}")
+
         model_results = run_oracle_for_model(model_name, args)
         cfg = MODEL_CONFIGS[model_name]
         all_summaries[model_name] = _best_layer_oracle_auroc(model_results, cfg["candidate_layers"])
