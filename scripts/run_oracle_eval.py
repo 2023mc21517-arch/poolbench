@@ -102,7 +102,6 @@ def _run_ixg_for_split(
     Returns float32 array of shape (n, d_model).
     """
     from poolbench.pooling_strategies import pool_mean  # noqa: PLC0415
-    from poolbench.extract_activations import _get_token_hidden_states  # type: ignore[attr-defined]  # noqa: PLC0415
 
     vectors = []
     n = len(texts)
