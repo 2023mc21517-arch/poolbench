@@ -33,15 +33,11 @@ for MODEL in "${MODELS[@]}"; do
     python scripts/save_steering_vectors.py --model "$MODEL" --device "$DEVICE"
 done
 
-# ── 3. Upload artifacts to HuggingFace ───────────────────────────────────────
+# ── 3. Upload steering vectors to HuggingFace ────────────────────────────────
+# (activations + bert-scorers already uploaded; SCP/D3 JSONs go to git repo)
 echo ""
-echo "=== [3/4] Uploading to HuggingFace ==="
-echo "  → steered-outputs"
-python scripts/upload_to_hf.py --token "$HF_TOKEN" --user "$HF_USER" --only steered-outputs
-echo "  → bert-scorers"
-python scripts/upload_to_hf.py --token "$HF_TOKEN" --user "$HF_USER" --only bert-scorers
-echo "  → activations (large — resumable, safe to Ctrl-C and re-run)"
-python scripts/upload_to_hf.py --token "$HF_TOKEN" --user "$HF_USER" --only activations
+echo "=== [3/4] Uploading steering vectors to HuggingFace ==="
+python scripts/upload_to_hf.py --token "$HF_TOKEN" --user "$HF_USER" --only steering-vectors
 
 echo ""
-echo "=== Done. All artifacts saved and uploaded. ==="
+echo "=== Done. ==="
