@@ -95,7 +95,8 @@ def _compute_steering_vector(
                           unigram_probs=unigram_probs,
                           concept_probe=concept_probe)
     except Exception as exc:
-        raise RuntimeError(f"[d3] pooling failed for {concept_name}/{strategy_id}: {exc}") from exc
+        log.warning(f"  [d3] pooling failed for {concept_name}/{strategy_id} — returning None: {exc}")
+        return None
 
     # S2_SIF requires first-PC subtraction on the combined pos+neg pool (§27),
     # matching the D1 batch treatment in compute_pooled_vectors_batch.
