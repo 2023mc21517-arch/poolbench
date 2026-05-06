@@ -36,7 +36,7 @@ log = get_logger("poolbench.sae_loader")
 _SAE_RELEASES: dict[str, dict] = {
     "mistral_7b": {
         "release":   "mistral-7b-res-wg",
-        "sae_id_tpl": "blocks.{layer}.hook_resid_post",
+        "sae_id_tpl": "blocks.{layer}.hook_resid_pre",
         "layers":    [8, 16, 24],
     },
     "llama3_8b": {
