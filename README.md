@@ -31,7 +31,7 @@ poolbench/
 │   │   └── rewriters.py             # Rule-based positive→negative rewriters
 │   │
 │   ├── construction/                # Subpackage: direction construction
-│   │   └── methods.py               # C1 DifMean · C2 PCA · C3 LogReg · C4 RepE · C5 SAE
+│   │   └── methods.py               # C1 DifMean · C2 PCA · C3 LogReg · C4 RepE 
 │   │
 │   ├── evaluation/                  # Subpackage: probing & statistics
 │   │   └── probe.py                 # AUROC (5-fold CV + bootstrap CI), Nemenyi, ICC
@@ -206,7 +206,7 @@ S = supervised (requires labeled corpus at pooling time); U = unsupervised.
 
 ## Construction methods
 
-Five methods for constructing the concept direction vector **d** from activations:
+Four methods for constructing the concept direction vector **d** from activations:
 
 | ID | Name | Notes |
 |---|---|---|
@@ -214,7 +214,6 @@ Five methods for constructing the concept direction vector **d** from activation
 | C2 | PCA | First PC of [pos; neg]. |
 | C3 | LogReg | L2-regularised logistic regression weight vector. |
 | C4 | RepE | PCA on per-pair differences `pos_i − neg_i` (Zou et al. 2023). |
-| C5 | SAE feature | Top-k SAE decoder columns by activation delta. |
 
 ---
 
